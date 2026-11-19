@@ -9,6 +9,11 @@ mod ui_state;
 mod workflow;
 mod audio_actions;
 mod speech_actions;
+mod study_actions;
+mod organize_actions;
+
+pub use organize_actions::LookUpState;
+pub use study_actions::{QuizRun, ReviewRun};
 
 use std::collections::HashMap;
 
@@ -76,6 +81,10 @@ pub struct LectioApp {
     ui_state: ui_state::UiState,
     /// Phase 3 (ADR-016): the speech service, transcription, captions, search.
     speech: speech_actions::SpeechState,
+    /// Phase 4a (ADR-021, ADR-022): AI study tools, quizzes, flashcards.
+    study: study_actions::StudyState,
+    /// Phase 4a: tasks, the focus timer, dictionary look-ups.
+    organize: organize_actions::OrganizeState,
     #[cfg(not(target_arch = "wasm32"))]
     screenshot: Option<crate::screenshot::ScreenshotDriver>,
 }
@@ -93,6 +102,11 @@ impl LectioApp {
         };
         app.purge_expired_trash();
         app.speech.service = app.platform.as_ref().filter(|_| app.can_save).and_then(|p| p.speech());
+        if let Some(platform) = app.platform.as_ref().filter(|_| app.can_save) {
+            app.study.model = platform.study_model();
+            app.study.has_key = platform.load_secret(study_actions::KEY_NAME).is_some();
+            app.organize.dictionary = platform.dictionary();
+        }
         // The saved theme choice (preferences are part of the library).
         cc.egui_ctx.set_theme(workflow::theme_from(app.library.preferences().theme));
         app
@@ -120,6 +134,8 @@ impl LectioApp {
             sample_blobs: HashMap::new(),
             ui_state: ui_state::UiState::default(),
             speech: speech_actions::SpeechState::default(),
+            study: study_actions::StudyState::default(),
+            organize: organize_actions::OrganizeState::default(),
             #[cfg(not(target_arch = "wasm32"))]
             screenshot: None,
         }
@@ -243,6 +259,43 @@ impl LectioApp {
                 .and_then(|id| self.library.session(id))
                 .and_then(|s| s.recording.as_ref())
                 .is_some_and(|r| r.cleaned_file.is_some()),
+            study: self.study_view(),
+            now_ms: now_unix_ms(),
+        }
+    }
+
+    fn study_view(&self) -> ui::StudyView<'_> {
+        use lectio_core::prefs::LocalModel;
+        let model = self.study.model.as_deref();
+        let now = now_unix_ms();
+        ui::StudyView {
+            ai_on: self.ai_on(),
+            ai_available: model.is_some(),
+            settings_open: self.study.settings_open,
+            has_key: self.study.has_key,
+            ollama: self.study.ollama.as_ref(),
+            download: self.study.download,
+            ready: self.study.ready,
+            last_timing: self.study.last_timing,
+            local_downloaded: LocalModel::ALL.map(|m| model.is_some_and(|s| s.is_downloaded(m))),
+            local_unavailable: LocalModel::ALL.map(|m| model.and_then(|s| s.unavailable(m))),
+            job: self.study.job.as_ref().map(|j| {
+                let what = match j.kind {
+                    study_actions::JobKind::Outline(_) => "outline",
+                    study_actions::JobKind::Quiz { .. } => "quiz",
+                    study_actions::JobKind::Cards(_) => "flashcards",
+                };
+                (what, j.next, j.total())
+            }),
+            quiz: self.study.quiz.as_ref(),
+            review: self.study.review.as_ref(),
+            due_cards: self.library.due_cards(now).len(),
+            focus: self.organize.focus.as_ref().map(|f| (f.course, f.timer.remaining_ms(now), f.timer.is_running())),
+            lookup: self.organize.lookup.as_ref(),
+            dictionary_available: self.organize.dictionary.is_some(),
+            dictionary_ready: self.organize.dictionary.as_ref().is_some_and(|d| d.is_ready()),
+            dict_download: self.organize.dict_download,
+            dict_indexing: self.organize.dict_indexing,
         }
     }
 
@@ -586,7 +639,9 @@ impl LectioApp {
         let material_busy = self.tick_material(ctx)
             | self.tick_speech(now)
             | self.tick_cleaning()
-            | self.tick_screenshot(ctx);
+            | self.tick_screenshot(ctx)
+            | self.tick_study()
+            | self.tick_organize();
         self.tick_ui_state(now);
         let loading = self.playback.as_ref().and_then(|p| p.player.as_ref()).is_some_and(|p| !p.is_ready());
         if self.is_recording_active() || self.view().playing || loading || material_busy {

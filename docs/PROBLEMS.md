@@ -398,3 +398,93 @@ Every bug, dead end and wrong turn while building Lectio, with the root cause, w
 - **Fix:** `percent.is_multiple_of(100)`; `State::Ready(Box<Loaded>)`; the worker's dependencies moved under
   `[target.'cfg(target_arch = "wasm32")'.dependencies]`, since on the desktop the worker binary is empty.
 - **Lesson:** run clippy for both targets (`--workspace` and `--target wasm32-unknown-unknown`): each target sees different code.
+
+## P-032: The 0.5B study model copied the prompt's template and echoed my notes
+- **Phase:** 4a
+- **Symptom:** the first quiz from the sample lecture had the choices `A) choice`, `B) choice`…, and outline headings were
+  whole transcript lines, word for word, with their `(17:05)` time in front (`lectio --ai-benchmark small`).
+- **Root cause:** a 0.5B model imitates the *shape and words* of what it is shown. A template with placeholder words is,
+  to it, an example to copy, and a numbered list of source lines invites it to repeat them.
+- **Tried:** stronger wording ("do not copy the template"). No change: small models follow examples better than rules.
+- **Fix:** tests first (`questions_with_placeholder_or_repeated_choices_are_dropped`,
+  `outline_lines_that_echo_the_material_with_its_time_are_dropped`), then: every prompt ends with a real worked example
+  on another topic (the solar system), and the parsers drop placeholder answers, questions whose choices repeat, and
+  outline titles over six words that copy a source line. With the same sample, 6 outline items and 3 of 3 questions were kept.
+- **Lesson:** with small models, show one good answer instead of describing the format, and check the output in code.
+
+## P-033: Generated items lost their citations, and acronyms like "DFS" were not matched
+- **Phase:** 4a
+- **Symptom:** many 0.5B outline items and questions had no `[S12]` marker, so the rule "drop items without a source"
+  dropped good items. When I matched items to sources by shared words instead, "Which structure does DFS use?" matched
+  nothing.
+- **Root cause:** the model often leaves the marker out. My first word matcher ignored words shorter than four letters,
+  which removed exactly the acronyms that carry the meaning in a CS lecture.
+- **Fix:** `sources::best_match` cites the source that shares the most distinctive words (at least two), counting words of
+  three letters or more but skipping a short list of common ones ("the", "and", "for"…). Test:
+  `an_item_without_source_numbers_is_cited_to_the_line_it_matches`.
+- **Lesson:** test data should look like the real data, and lecture notes are full of three-letter acronyms.
+
+## P-034: The schema v5 change broke the build and one old test
+- **Phase:** 4a
+- **Symptom:** (1) `field cards of struct Library is private` where the study module built a new library with
+  `..lib.clone()`; (2) `the trait Eq is not implemented for f32` once flashcards stored their SM-2 ease in the library;
+  (3) the old test that checked "version 4 is written" failed (`left: 5, right: 4`).
+- **Root cause:** (1) struct-update syntax needs every field visible in that module; (2) `f32` has no total equality
+  (`NaN != NaN`), so a struct holding one can't derive `Eq`; (3) the test pinned the old version number on purpose.
+- **Fix:** small `with_card_list` / `with_focus_log` constructors in `model.rs`; `Library` derives `PartialEq` only (nothing
+  needed `Eq`); the old test was replaced by `a_version_4_library_loads_with_no_study_data`, which reads a v4 file and
+  checks that version 5 is written.
+- **Lesson:** a test that pins a schema version is meant to fail when the version changes. Replace it with one for the new
+  version *and* one that reads the old files.
+
+## P-035: The study model never finished an outline in the browser
+- **Phase:** 4a
+- **Symptom:** in headless Chrome the outline stayed at "Writing the outline: part 1 of 1…" for 25 minutes, with no error;
+  the same prompt takes about 10 s on the desktop.
+- **Root cause:** candle has fast WebAssembly kernels for the quantized formats the model uses (Q4_K, Q6_K), but they are
+  compiled only when the `simd128` target feature is on (`#[cfg(target_feature = "simd128")]` in
+  `candle-core/src/quantized/k_quants.rs`). My browser build didn't turn it on, so every matrix product ran in plain scalar
+  code.
+- **Fix:** `.cargo/config.toml` adds `-C target-feature=+simd128` for `wasm32-unknown-unknown`. The outline then came back
+  in headless Chrome: 780 tokens (prompt and reply) in 93 s, about 8 tokens/s, against roughly 60 on the desktop.
+  WebAssembly SIMD needs Chrome 91, Firefox 89 or Safari 16.4 (all from 2021–2023).
+- **Lesson:** when a library has several code paths per CPU, check which one my target actually compiles. A missing
+  target feature doesn't fail; it is just slow.
+
+## P-036: Outlines of a short session were empty, and headings pointed at the wrong moment
+- **Phase:** 4a
+- **Symptom:** (1) for a session with six short notes, "Write an outline" ended with "The model's outline had no lines
+  Lectio could check". (2) With fourteen notes it wrote eight good titles, but "Depth-first search details" started at
+  0:11 (the Queue definition) instead of 0:18.
+- **Root cause:** (1) with so little material the 0.5B model copied each note back as a "heading", and the parser drops
+  copied lines (P-032), so nothing was left. (2) The model numbered its headings `[S1]`, `[S2]`, `[S3]`… in order instead of
+  citing, so the numbers pointed at unrelated lines. I reproduced both on the desktop with
+  `lectio --ai-benchmark small --saved` on a copy of the browser test's notes.
+- **Fix:** tests first, then: (1) `prompts::enough_for_outline` asks for at least 150 tokens (about 600 characters) of
+  material and otherwise says so before calling any model. My first limit, 250, was a guess and was wrong: the browser
+  test's 13 notes (232 tokens) were refused, and even the 14 notes that gave eight good headings were only 247. 150 sits
+  between the measured cases (6 notes ≈ 95 tokens only echoed; 13–14 notes worked). (2) `sources::checked_ids` treats a cited line that shares fewer
+  than two distinctive words with the item as a wrong number, and uses the best-matching line instead (if there is one).
+  Tests: `a_handful_of_short_notes_is_too_little_for_an_outline`,
+  `a_cited_line_that_shares_too_little_with_the_item_is_taken_as_a_wrong_number`. One older test had to change: it cited an
+  unrelated slide line on purpose, which the new rule now corrects.
+- **Lesson:** "it has a citation" is not the same as "the citation is right"; a cheap check against the item's own words
+  catches most wrong numbers from a small model.
+
+## P-037: Outline titles in the browser started with "- "
+- **Phase:** 4a
+- **Symptom:** the first outline written in the browser showed titles like "- Breadth-first search (BFS) is a useful…".
+- **Root cause:** the model wrote two list markers (`- - Title`); the parser removed only the first. The browser's answer
+  differed from the desktop's for the same prompt, most likely because the maths runs on different vector instructions
+  (WebAssembly SIMD vs ARM NEON) and tiny rounding differences change which word greedy decoding picks.
+- **Fix:** test first (`doubled_list_markers_are_not_part_of_a_title`), then `outline::without_marks` strips repeated
+  `-`, `*`, `•` and `1.` markers.
+- **Lesson:** the same model and prompt can answer differently on another platform, so the parser has to accept every
+  shape seen on any of them.
+
+## P-038: Linux CI failed to link: `unable to find library -lgbm`
+- **Phase:** 3 (found on the first CI run after Phase 3)
+- **Symptom:** The `native (ubuntu-latest)` job compiled everything and then failed at the final link step: `rust-lld: error: unable to find library -lgbm`. Windows, macOS and the web build passed.
+- **Root cause:** The screenshot library (`xcap`) captures Wayland screens through `libwayshot`, which links to the system's GBM library (Mesa's buffer manager). The CI image had PipeWire and DBus installed for system audio but not GBM. I couldn't see this on a Mac because Linux can't be linked from macOS (see the earlier Linux type-check problem).
+- **Fix:** Added `libgbm-dev` to the CI's Linux packages, plus `libegl1-mesa-dev` and `libdrm-dev`, which the same capture path uses.
+- **Lesson:** Adding a dependency with native code means checking which system libraries it links on every OS, not only whether it compiles. The CI matrix is what caught it.

@@ -15,21 +15,19 @@ use std::rc::Rc;
 use js_sys::{Array, Float32Array, Promise, Reflect, Uint8Array};
 use lectio_core::SessionId;
 use lectio_core::prefs::SpeechModel;
-use lectio_speech::models::{self, Checksum, ModelInfo};
+use lectio_speech::models::{self, ModelInfo};
 use lectio_speech::protocol::{FromWorker, ToWorker};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{IdbDatabase, MessageEvent, ReadableStreamDefaultReader, Response, Worker};
+use web_sys::{IdbDatabase, MessageEvent, Worker};
 
-use super::{idb, js_err};
+use super::{fetch, idb, js_err};
 use crate::platform::speech::{SpeechEvent, SpeechRequest, SpeechService};
 use crate::platform::wav::decode_mono_i16;
 
 /// The worker's start-up script, written by trunk (`data-loader-shim`).
-const WORKER_URL: &str = "./lectio-worker_loader.js";
-/// Report download progress about every this many bytes.
-const PROGRESS_STEP: u64 = 1 << 20;
+pub(super) const WORKER_URL: &str = "./lectio-worker_loader.js";
 const WAIT_MS: i32 = 100;
 
 struct Inner {
@@ -121,7 +119,7 @@ fn post(worker: &Worker, command: &ToWorker, buffers: &[JsValue]) -> Result<(), 
     worker.post_message_with_transfer(&message, &transfer).map_err(js_err)
 }
 
-fn sleep(ms: i32) -> JsFuture {
+pub(super) fn sleep(ms: i32) -> JsFuture {
     JsFuture::from(Promise::new(&mut |resolve, _| {
         if let Some(window) = web_sys::window() {
             let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms);
@@ -173,38 +171,12 @@ impl Inner {
 
     /// Fetches one file chunk by chunk, checking its checksum as it arrives.
     async fn download(&self, info: &ModelInfo, file: &models::ModelFile, done_before: u64) -> Result<(), String> {
-        let window = web_sys::window().ok_or("no browser window")?;
-        let offline = |e: JsValue| format!("Could not download the speech model ({}). Check the connection.", js_err(e));
-        let response: Response = JsFuture::from(window.fetch_with_str(&info.url(file)))
-            .await
-            .map_err(offline)?
-            .dyn_into()
-            .map_err(js_err)?;
-        if !response.ok() {
-            return Err(format!("The model server answered {} for {}.", response.status(), file.name));
-        }
-        let reader: ReadableStreamDefaultReader =
-            response.body().ok_or("empty download")?.get_reader().dyn_into().map_err(|_| "no stream reader".to_string())?;
-        let mut bytes = Vec::with_capacity(file.bytes as usize);
-        let mut checksum = Checksum::default();
-        let mut reported = 0u64;
-        loop {
-            let chunk = JsFuture::from(reader.read()).await.map_err(offline)?;
-            if Reflect::get(&chunk, &"done".into()).ok().and_then(|d| d.as_bool()).unwrap_or(true) {
-                break;
-            }
-            let value: Uint8Array = Reflect::get(&chunk, &"value".into()).map_err(js_err)?.dyn_into().map_err(js_err)?;
-            let piece = value.to_vec();
-            checksum.update(&piece);
-            bytes.extend_from_slice(&piece);
-            if bytes.len() as u64 - reported >= PROGRESS_STEP {
-                reported = bytes.len() as u64;
-                let total = info.total_bytes();
-                self.emit(SpeechEvent::Downloading { model: info.model, done: done_before + reported, total });
-            }
-        }
-        checksum.check(file)?;
-        idb::put(&self.db, idb::MODELS, &key(info, file), &Uint8Array::from(bytes.as_slice())).await
+        let (model, total) = (info.model, info.total_bytes());
+        let bytes = fetch::download(&info.url(file), file, |received| {
+            self.emit(SpeechEvent::Downloading { model, done: done_before + received, total });
+        })
+        .await?;
+        idb::put(&self.db, idb::MODELS, &key(info, file), &bytes).await
     }
 
     async fn transcribe(

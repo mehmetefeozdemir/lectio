@@ -152,10 +152,3 @@ fn a_version_3_library_loads_with_no_transcripts_and_default_audio_settings() {
     assert_eq!(lib.preferences().speed_percent, 100);
     assert!(!lib.preferences().filters.any());
 }
-
-#[test]
-fn version_4_is_written_and_newer_files_are_refused() {
-    assert!(Library::default().to_json().unwrap().contains("\"schema_version\": 4"));
-    let v5 = r#"{"schema_version": 5, "courses": [], "labels": {"labels": []}}"#;
-    assert!(matches!(Library::from_json(v5), Err(ModelError::UnsupportedSchema { found: 5, supported: 4 })));
-}

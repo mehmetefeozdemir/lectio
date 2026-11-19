@@ -1,6 +1,7 @@
 # Architecture
 
-> Updated after each phase. Current state: **end of Phase 2 (Material) + UI redesign (ADR-014)**.
+> Updated after each phase. Current state: **end of Phase 4a (Study)**: outline, quizzes, flashcards, tasks, focus timer
+> and definitions on top of Phases 1–3 (see "Phase 4a: study" at the end).
 
 ## Stack
 Rust 2024 edition, **one codebase for Windows, macOS, Linux and the web** (ADR-010). UI with **eframe/egui 0.37** (ADR-003),
@@ -46,6 +47,10 @@ flowchart TB
 | `put_blob` / `get_blob` / `delete_blob` | `FileBlobStore` (`lectio-core`), atomic write | IndexedDB table `blobs`, queued writes |
 | `open_camera` → `CameraSession` | `None` (file picker instead, ADR-013) | `WebCamera`: `<video>` + off-screen canvas, JPEG snapshot |
 | slide rendering (not a trait: same code) | `DeckRenderer` on a background thread | `DeckRenderer`: one page per frame on the main thread |
+| `SpeechService` (Phase 3) | Whisper on a thread | Whisper in a Web Worker |
+| `StudyModel` (Phase 4a, ADR-021) | one thread: Qwen (candle), Ollama, endpoint (`ureq`) | Qwen in a second Web Worker; Ollama / endpoint with `fetch` |
+| `DictionaryService` (Phase 4a, ADR-022) | thread; index file in `dictionary/` | index built in a short-lived worker, kept in IndexedDB |
+| `load_secret` / `save_secret` (the endpoint key) | `secrets.json`, permissions 0600 | `localStorage`, this page's address only |
 
 Browser APIs are asynchronous; the traits are synchronous because egui redraws every frame. So the web side starts work with
 `wasm_bindgen_futures::spawn_local` and the app checks results each frame: `is_ready()`, `take_error()`,
@@ -82,14 +87,28 @@ lectio/
 │   │   ├── search.rs          # Phase 3: fold, word/prefix matching, ranking, snippets, search_deck, with_slide_text
 │   │   ├── dsp.rs             # Phase 3: analyse, biquads, expander, normalise gain, FilterChain, with_cleaned_copy
 │   │   ├── stretch.rs         # Phase 3: speed steps, skip, time left, TimeStretcher (WSOLA)
+│   │   ├── sources.rs         # Phase 4a: numbered sources ([S12] (17:05) text), chunking under a token budget,
+│   │   │                      #   citation parsing + mapping, best_match (cite by shared words)
+│   │   ├── prompts.rs         # Phase 4a: outline / quiz / card prompts with worked examples; token budgets
+│   │   ├── outline.rs         # Phase 4a: Outline, parse_outline, merge, outline → Heading notes
+│   │   ├── quiz.rs            # Phase 4a: questions, parsing, cloze fallback, grading, topics, attempts
+│   │   ├── cards.rs           # Phase 4a: flashcards, SM-2 scheduling, due cards
+│   │   ├── tasks.rs           # Phase 4a: Task notes across courses, done / due date, filters
+│   │   ├── focus.rs           # Phase 4a: FocusTimer (pause/resume), focus log per course
+│   │   ├── dictionary.rs      # Phase 4a: WordNet line parsing, compact index, base forms, online provider trait
 │   │   └── storage.rs         # LibraryStore, interpret_saved, JsonFileStore, FileBlobStore (atomic writes)
-│   └── tests/                 # 143 tests: model, material, workflow, transcript, search, audio DSP, seek, clock,
-│                              #   storage, resample, capture pipeline
+│   └── tests/                 # model, material, workflow, transcript, search, audio DSP, seek, clock, storage,
+│                              #   resample, capture pipeline, study (chunking, citations, quiz), review (SM-2,
+│                              #   tasks, focus, dictionary, v4 → v5)
 ├── crates/lectio-speech/      # Phase 3 (ADR-016): Whisper on candle, no platform code
 │   └── src/                   # mel.rs (spectrogram), tokenizer.rs (tokens → text, languages), models.rs (files,
 │                              #   pinned revisions, SHA-256), engine.rs (one 30 s window), job.rs (window stepper,
 │                              #   captions), protocol.rs (page ↔ worker messages); 13 tests
-├── crates/lectio-worker/      # Phase 3: the browser's speech Web Worker (wasm only; empty on desktop)
+├── crates/lectio-llm/         # Phase 4a (ADR-021): Qwen2.5-Instruct (GGUF) on candle, no platform code
+│   └── src/                   # models.rs (files, pinned revisions, SHA-256), engine.rs (chat template, greedy
+│                              #   decoding with a repeat penalty), protocol.rs (page ↔ study worker messages)
+├── crates/lectio-worker/      # the browser's Web Worker (wasm only; empty on desktop): Whisper (Phase 3), and in a
+│                              #   second copy the study model and the dictionary index (Phase 4a, study.rs)
 ├── src/
 │   ├── main.rs                # module list + two `main`s, picked by target
 │   ├── entry_native.rs        # native: args (--screenshot, --self-test-audio, --transcribe), window options
@@ -100,6 +119,8 @@ lectio/
 │   ├── app/workflow.rs        # screens, trash, posting slides, saved layout/theme, Copy all / Export Markdown
 │   ├── app/speech_actions.rs  # Phase 3: transcription, model download, live captions, search, opening a result
 │   ├── app/audio_actions.rs   # Phase 3: speed, filters, cleaned copy, recording source, screenshots
+│   ├── app/study_actions.rs   # Phase 4a: AI provider, jobs (outline/quiz/cards over chunks), quiz and review runs
+│   ├── app/organize_actions.rs # Phase 4a: tasks, focus timer, word look-up
 │   ├── action.rs              # Action enum: everything the UI can ask for
 │   ├── material.rs            # Phase 2 runtime state: pending imports, Viewer, image/slide texture caches, camera
 │   ├── media/                 # slides.rs (hayro, DeckRenderer: pages + text), slide_text.rs (text device),
@@ -108,16 +129,24 @@ lectio/
 │   │   ├── mod.rs             # traits Platform / AudioCapture / AudioPlayback / CameraSession, Pending, FileKind,
 │   │   │                      #   CaptureSource
 │   │   ├── speech.rs          # SpeechService trait, SpeechRequest / SpeechEvent
+│   │   ├── ai.rs              # Phase 4a: StudyModel trait, AiRequest (key hidden in Debug), Ollama / OpenAI bodies
+│   │   ├── dictionary.rs      # Phase 4a: DictionaryService trait, the pinned WordNet download
 │   │   ├── wav.rs             # WAV bytes ↔ samples (shared; 2 unit tests)
 │   │   ├── native/            # mod.rs (NativePlatform: data folder, rfd, FileBlobStore, xcap), recorder.rs (mic +
-│   │   │                      #   loopback, mixing), player.rs (stretcher + filters), speech.rs (thread, download, CLI)
-│   │   └── web/               # mod.rs (WebPlatform), idb.rs, store.rs, recorder.rs, player.rs (<audio>), files.rs,
-│   │                          #   camera.rs, display.rs (getDisplayMedia), speech.rs (model download, worker)
+│   │   │                      #   loopback, mixing), player.rs (stretcher + filters), speech.rs (thread, CLI),
+│   │   │                      #   fetch.rs (checked downloads, JSON POST), ai.rs (study thread, --ai-benchmark),
+│   │   │                      #   dictionary.rs (thread), secrets.rs (0600 file)
+│   │   └── web/               # mod.rs (WebPlatform, localStorage key), idb.rs, store.rs, recorder.rs, player.rs,
+│   │                          #   files.rs, camera.rs, display.rs (getDisplayMedia), fetch.rs (checked downloads into
+│   │                          #   a JS buffer, JSON POST), speech.rs (speech worker), ai.rs (study worker, Ollama,
+│   │                          #   endpoint), dictionary.rs (index built in a short-lived worker)
 │   ├── ui/                    # views (see "Screens and workspace"): theme (tokens), widgets, icons, format,
-│   │                          #   nav (left column), home (Home/Collections/Trash/Tasks), search (Search page),
+│   │                          #   nav (left column), home (Home/Collections/Trash), search (Search page),
 │   │                          #   workspace (panels, Layout menu, tabs, caption strip), slides, notes (feed),
-│   │                          #   stream (Audio | Transcript tabs), transcript, capture + playback + composer (input
-│   │                          #   bar), timeline, reading, sketch, camera, screen_crop, labels (rename window)
+│   │                          #   stream (Audio | Transcript | Outline tabs), transcript, capture + playback + composer
+│   │                          #   (input bar), timeline, reading, sketch, camera, screen_crop, labels (rename window);
+│   │                          #   Phase 4a: outline, study (cards, quiz, focus), tasks, define (look-up window),
+│   │                          #   ai_settings
 │   ├── demo.rs                # sample data with slides + a sketch (--screenshot, web #sample)
 │   ├── self_test.rs           # native only: headless mic test
 │   └── screenshot.rs          # native only: draws 120 frames, saves a PNG, exits
@@ -125,7 +154,8 @@ lectio/
 └── shots/                     # screenshots
 ```
 
-## Data model (implemented; schema version 4)
+## Data model (implemented; schema version 5)
+The diagram shows versions 1–4; the Phase 4a (v5) additions are drawn separately below it.
 ```mermaid
 erDiagram
   LIBRARY ||--o{ COURSE : contains
@@ -217,6 +247,62 @@ erDiagram
     string name "renameable display name"
   }
 ```
+
+Schema version 5 (Phase 4a): study data. Every new field has a default and is left out of the JSON when empty, so a v4
+file loads unchanged (`a_version_4_library_loads_with_no_study_data`).
+```mermaid
+erDiagram
+  LIBRARY ||--o{ CARD : "cards (v5)"
+  LIBRARY ||--o{ FOCUS_ENTRY : "focus_log (v5)"
+  SESSION ||--o| OUTLINE : "outline (v5)"
+  OUTLINE ||--|{ OUTLINE_ITEM : items
+  SESSION ||--o{ QUIZ_ATTEMPT : "quiz_attempts (v5)"
+  NOTE ||--o| TASK_INFO : "task (v5, Task-labelled notes)"
+  CARD }o--|| SESSION : "made from"
+  CARD }o--o| NOTE : "Definition note, if made from one"
+  FOCUS_ENTRY }o--|| COURSE : "studied"
+  OUTLINE_ITEM ||--|{ CITATION : cites
+  CARD ||--o{ CITATION : cites
+  OUTLINE {
+    string model "which provider/model wrote it"
+    u64 created_unix_ms
+  }
+  OUTLINE_ITEM {
+    string title
+    u8 level "1 = section, 2 = sub-point"
+  }
+  CITATION {
+    u64 offset_ms "a moment, or none"
+    SlideLink slide "a slide, or none"
+  }
+  QUIZ_ATTEMPT {
+    u64 unix_ms
+    u32 questions
+    u32 correct
+    string[] topics "outline headings chosen"
+  }
+  CARD {
+    uuid id
+    string front
+    string back
+    Review review "SM-2: ease, interval_days, repetitions, lapses, due_unix_ms"
+  }
+  TASK_INFO {
+    bool done
+    u64 due_unix_ms "optional"
+  }
+  FOCUS_ENTRY {
+    u64 started_unix_ms
+    u32 minutes "1-180"
+  }
+```
+`Preferences` gains `ai` (`none | local {small|large} | ollama {model} | open_ai {base_url, model}`; never the key),
+`online_dictionary` (off by default) and `show_outline_tab`. Rules (tested in `tests/study_tests.rs` and
+`tests/review_tests.rs`): a citation can only come from a source that was actually sent to the model (unknown source
+numbers are ignored, and an item left with no citation is dropped); a card's front and back can't be blank; only
+Task-labelled notes take a done state or a due date; a focus entry needs an existing course and at least one minute (the
+timer offers 1–180); due flashcards only count for sessions that aren't in the trash.
+
 Rules enforced by `Library` (tested in `tests/model_tests.rs` and `tests/material_tests.rs`): names can't be blank or longer
 than 80 characters; a note needs text, a label or an image; notes of every kind stay sorted by `offset_ms` (linking a slide
 never moves a note); a note can't be placed after the end of an existing recording; a session gets one recording; a slide link
@@ -239,12 +325,18 @@ Native: the OS app-data folder (macOS ~/Library/Application Support/org.Lectio.L
   blobs/<uuid>.pdf|png|jpg      # Phase 2: slide decks, photos (as picked), sketches (PNG)
   recordings/<id>-clean.wav     # Phase 3: a cleaned copy, if the user made one
   models/whisper-<size>/        # Phase 3: config.json, tokenizer.json, model.safetensors (checked by SHA-256)
+  models/qwen2.5-<size>-instruct/  # Phase 4a: model.gguf, tokenizer.json (checked by SHA-256)
+  dictionary/wordnet-index.tsv  # Phase 4a: the compact dictionary index (the 49 MB download is deleted after)
+  secrets.json                  # Phase 4a: the endpoint key, readable by this user only (0600); never in library.json
 
 Web: IndexedDB database "lectio" (version 3) in the browser, per site
   table "library":    key "library.json"      → the same JSON text
   table "recordings": key "<session-id>.wav"  → the same WAV bytes
   table "blobs":      key "<uuid>.pdf|png|jpg" → the file's bytes (added by the v1→v2 upgrade; v1 data is kept)
   table "models":     key "whisper-<size>/<file>" → a speech-model file (added by the v2→v3 upgrade)
+                      key "qwen2.5-<size>-instruct/<file>" → a study-model file (Phase 4a)
+                      key "wordnet-index.tsv" → the dictionary index (Phase 4a)
+localStorage: "lectio-secret:openai-compatible" → the endpoint key (Phase 4a)
 ```
 
 ## Phase 2 flows
@@ -583,8 +675,86 @@ segment), "Search everything", "Search slides", "Audio source", "Live captions",
 ### Phase 3 known limitations
 - No speaker separation (ADR-020). Live captions need the model downloaded first and lag about 2 s behind.
 - The tiny model mishears technical words; base and small are better but slower (numbers in ADR-016).
-- Small is desktop-only (browser tab memory). The browser build has no WebAssembly SIMD yet, so it is slower there.
+- Small is desktop-only (browser tab memory). Since Phase 4a the browser build uses WebAssembly SIMD (P-035).
 - Computer audio: macOS 14.2+ and permission; Firefox and Safari can't share tab sound; if the default output device also
   has a microphone, macOS records that microphone instead.
 - Slide text: decks from before Phase 3 are read the first time their session opens; scanned (image-only) PDFs have none.
 - Search scans everything each time: fine for a few terms of lectures, would need an index for much more.
+
+## Phase 4a: study
+Every AI feature goes through one trait, `StudyModel` (ADR-021), and every generated item carries citations (a moment
+and/or a slide) that seek the recording or open the slide when clicked. With no provider set, the Outline tab and the
+"with AI" buttons are not drawn; flashcards and the quiz still work from Definition notes.
+
+### Write an outline (the same pipeline makes AI quizzes and flashcards)
+```mermaid
+sequenceDiagram
+  participant UI as ui/outline.rs
+  participant App as app/study_actions.rs
+  participant Core as lectio-core (sources, prompts, outline)
+  participant M as StudyModel (thread / worker / Ollama / endpoint)
+  UI->>App: Action::GenerateOutline
+  App->>Core: sources::gather(session) → numbered sources<br/>(notes, slide text, transcript; time order)
+  App->>Core: chunk(sources, 1500 tokens) → at most 8 chunks (even sample)
+  loop each chunk, one request at a time
+    App->>Core: prompts::outline(chunk) → system + user text
+    App->>M: AiRequest::Complete {id, provider, key only for an endpoint}
+    M-->>App: AiEvent::Downloading… / Ready (local, first use)
+    M-->>App: AiEvent::Reply {id, text}
+    App->>Core: parse_outline(text, chunk.sources)<br/>[S12] → moment/slide; no marker → best_match; no source → dropped
+  end
+  App->>Core: merge_outlines → Library::with_outline (saved)
+  UI->>App: click a citation → Action::PlayFrom(ms) / open the slide
+  UI->>App: "Add to feed as headings" → with_outline_headings (Heading notes at each time)
+```
+Each request waits for the previous one, so a long lecture shows "part 2 of 5" and one failure stops the job with a
+message instead of leaving half a result. Quizzes split the requested number of questions across chunks (`spread`);
+flashcards ask for up to 5 per chunk.
+
+### Where the local model runs
+```mermaid
+flowchart LR
+  subgraph Desktop
+    T["lectio-study thread"] --> E1["lectio-llm LlmEngine (candle, Accelerate on macOS)"]
+    T --> H["ureq: Ollama 127.0.0.1:11434 / endpoint"]
+  end
+  subgraph Browser
+    P["page: platform/web/ai.rs"] -->|"ToStudy::Load (gguf + tokenizer, transferred)"| W2["2nd worker copy: study.rs → LlmEngine (wasm SIMD)"]
+    W2 -->|"Started / Loaded / Reply / Failed"| P
+    P --> F["fetch: Ollama / endpoint (needs CORS)"]
+    P -->|"ToStudy::BuildIndex (WordNet JSONL)"| W3["short-lived worker → index text"]
+  end
+```
+A worker can lose messages sent before its program has loaded, so every worker copy first posts `Started` and the page
+waits for it. If the study worker dies (usually out of memory), its `error` event fails every request it was holding,
+so the app never waits forever, and the next request starts a fresh worker.
+
+### Quiz, flashcards, tasks, focus, definitions
+- **Quiz** (`ui/study.rs`): pick one session or a whole course, the number of questions and topics (the outline's
+  headings, or all). With AI: multiple choice and short answer, each with an explanation and citations. Without AI (or
+  with the switch off): fill-in-the-blank questions from Definition notes written as "Term: meaning". Typed answers are
+  right if they contain every word of the expected answer (case, accents and punctuation ignored). The score is saved
+  on each session the questions came from (`QuizAttempt`).
+- **Flashcards**: "Make cards from Definition notes" (no AI, one card per note, never duplicated) and "Write cards with
+  AI". Review shows the front, then the back, and the user grades Again / Hard / Good / Easy; SM-2 sets the next due
+  date (`cards::review`). Home shows the number of cards due.
+- **Tasks** (Tasks page): every Task-labelled note in live sessions (open ones first, then by due date with undated
+  last, then newest session and time in the lecture), filterable by course
+  and done state; ticking it done or setting a due date stores a `TaskInfo` on the note; "jump" opens the session at
+  that moment.
+- **Focus timer**: choose a course and minutes; a chip in the toolbar shows the time left on every screen, with
+  pause / resume. Finishing logs a `FocusEntry` (the minutes actually spent); cancelling logs nothing.
+- **Definitions**: double-click a word in a note or the transcript → the look-up window tries the offline index (base
+  forms: plurals, -ing, -ed), then, only if the user allowed it, dictionaryapi.dev. "Add to feed" makes a Definition
+  note at the current moment ("word: meaning"), which then feeds flashcards and the offline quiz.
+
+### Phase 4a known limitations
+- The 0.5B model writes simple outlines and questions; subtle questions need the 1.5B model, Ollama or an endpoint. In the
+  browser it runs at about 8 tokens/s (about 60 on an M2 desktop), so an outline takes a minute or two, and its titles
+  are sometimes whole sentences instead of short headings.
+- An outline needs about 600 characters of material; shorter sessions get a message instead (P-036).
+- In the browser, Ollama only answers pages it allows (by default `localhost` pages), and an endpoint must send CORS
+  headers. The browser key lives in `localStorage`, which any script on the same page address could read; Lectio loads
+  no third-party scripts.
+- The dictionary is English only. Look-ups don't handle irregular forms ("went" → "go").
+- A running job (outline, AI quiz, AI cards) can't be cancelled; it runs to the end or stops at the first error.

@@ -1,5 +1,9 @@
 //! Windows, macOS and Linux: files on disk, `cpal` audio, `rfd` dialogs.
 
+mod ai;
+mod dictionary;
+mod fetch;
+mod secrets;
 mod player;
 mod recorder;
 mod speech;
@@ -11,6 +15,7 @@ use lectio_core::storage::{FileBlobStore, JsonFileStore, LibraryStore};
 
 pub use player::Player;
 pub use recorder::Recorder;
+pub use ai::run_benchmark as ai_benchmark;
 pub use speech::run_cli as transcribe_cli;
 
 use eframe::egui;
@@ -102,6 +107,24 @@ impl Platform for NativePlatform {
         let dir = data_dir();
         let store = JsonFileStore::new(&dir);
         Some(Box::new(speech::NativeSpeech::start(models_dir(), move |name| store.audio_path(name))))
+    }
+
+    fn study_model(&self) -> Option<Box<dyn crate::platform::ai::StudyModel>> {
+        Some(Box::new(ai::NativeStudyModel::start(models_dir())))
+    }
+
+    fn dictionary(&self) -> Option<Box<dyn crate::platform::dictionary::DictionaryService>> {
+        Some(Box::new(dictionary::NativeDictionary::start(data_dir().join("dictionary"))))
+    }
+
+    /// Keys live in `<data>/secrets.json`, apart from the library (which a
+    /// user may share), readable only by the user on macOS and Linux.
+    fn load_secret(&self, name: &str) -> Option<String> {
+        secrets::load(&data_dir().join(secrets::FILE_NAME), name)
+    }
+
+    fn save_secret(&self, name: &str, value: Option<&str>) -> Result<(), String> {
+        secrets::save(&data_dir().join(secrets::FILE_NAME), name, value)
     }
 
     /// Computer audio is offered on every desktop; if the OS refuses (old

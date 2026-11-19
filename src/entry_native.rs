@@ -6,7 +6,7 @@ use std::process::ExitCode;
 
 use eframe::egui;
 
-use lectio_core::prefs::SpeechModel;
+use lectio_core::prefs::{LocalModel, SpeechModel};
 
 use crate::action::Screen;
 use crate::app::{LectioApp, Startup};
@@ -17,7 +17,8 @@ const WINDOW_TITLE: &str = "Lectio";
 const DEFAULT_WINDOW_SIZE: [f32; 2] = [1120.0, 740.0];
 const MIN_WINDOW_SIZE: [f32; 2] = [640.0, 420.0];
 const USAGE: &str = "Usage: lectio [--screenshot <file.png> | --self-test-audio <seconds> | \
-                     --transcribe <file.wav> [--model tiny|base|small] [--language <code>]]";
+                     --transcribe <file.wav> [--model tiny|base|small] [--language <code>] | \
+                     --ai-benchmark [small|large] [--saved]]";
 
 #[derive(Debug)]
 enum Mode {
@@ -25,6 +26,8 @@ enum Mode {
     Screenshot(PathBuf),
     SelfTestAudio(u64),
     Transcribe { wav: PathBuf, model: SpeechModel, language: Option<String> },
+    /// `saved`: the newest session in the saved library instead of the sample.
+    AiBenchmark { model: LocalModel, saved: bool },
 }
 
 pub fn run() -> ExitCode {
@@ -39,6 +42,7 @@ pub fn run() -> ExitCode {
     let screenshot_path = match mode {
         Mode::SelfTestAudio(seconds) => return self_test::run(seconds),
         Mode::Transcribe { wav, model, language } => return transcribe(&wav, model, language.as_deref()),
+        Mode::AiBenchmark { model, saved } => return ai_benchmark(model, saved),
         Mode::Screenshot(path) => Some(path),
         Mode::Normal => None,
     };
@@ -51,11 +55,13 @@ pub fn run() -> ExitCode {
                 Some(path) => LectioApp::new(cc, Startup::Sample).with_screenshot(path),
                 None => LectioApp::new(cc, Startup::Saved(Ok(Box::new(NativePlatform::open())))),
             };
-            // Test aid: LECTIO_START=home|trash|collections opens on that screen (screenshots).
+            // Test aid: LECTIO_START=home|trash|collections|tasks|study opens on that screen (screenshots).
             let app = match std::env::var("LECTIO_START").as_deref() {
                 Ok("home") => app.with_screen(Screen::Home),
                 Ok("trash") => app.with_screen(Screen::Trash),
                 Ok("collections") => app.with_screen(Screen::Collections),
+                Ok("tasks") => app.with_screen(Screen::Tasks),
+                Ok("study") => app.with_screen(Screen::Study),
                 Ok("search") => app.with_search(&std::env::var("LECTIO_SEARCH").unwrap_or_default()),
                 _ => app,
             };
@@ -91,6 +97,7 @@ fn parse_args(args: Vec<String>) -> Result<Mode, String> {
         [flag] if flag == "--self-test-audio" => Err("--self-test-audio needs a number of seconds".into()),
         [flag, wav, rest @ ..] if flag == "--transcribe" => parse_transcribe(wav, rest),
         [flag] if flag == "--transcribe" => Err("--transcribe needs a WAV file (16 kHz mono)".into()),
+        [flag, rest @ ..] if flag == "--ai-benchmark" => parse_benchmark(rest),
         [flag, ..] if flag == "--help" || flag == "-h" => {
             Err("Lectio: lecture notes timestamped to the audio.".into())
         }
@@ -114,6 +121,53 @@ fn parse_transcribe(wav: &str, rest: &[String]) -> Result<Mode, String> {
         }
     }
     Ok(Mode::Transcribe { wav: PathBuf::from(wav), model, language })
+}
+
+/// `[small|large] [--saved]`, in any order.
+fn parse_benchmark(rest: &[String]) -> Result<Mode, String> {
+    let (mut model, mut saved) = (LocalModel::Small, false);
+    for word in rest {
+        match word.as_str() {
+            "small" => model = LocalModel::Small,
+            "large" => model = LocalModel::Large,
+            "--saved" => saved = true,
+            _ => return Err("--ai-benchmark takes small or large, and --saved".into()),
+        }
+    }
+    Ok(Mode::AiBenchmark { model, saved })
+}
+
+/// The newest session in the saved library (`LECTIO_DATA_DIR` or the data folder).
+fn newest_saved_session() -> Result<(lectio_core::Library, lectio_core::SessionId), String> {
+    use crate::platform::Platform;
+    let library = NativePlatform::open().store().load().map_err(|e| e.to_string())?.library;
+    let session = library.live_sessions().first().map(|(_, s)| s.id).ok_or("The saved library has no sessions.")?;
+    Ok((library, session))
+}
+
+/// Runs the local study model on the sample lecture (or the newest saved
+/// session) and prints its replies and speed.
+fn ai_benchmark(model: LocalModel, saved: bool) -> ExitCode {
+    let (library, session) = if saved {
+        match newest_saved_session() {
+            Ok(found) => found,
+            Err(e) => {
+                eprintln!("Benchmark failed: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        let sample = crate::demo::sample_library();
+        (sample.library, sample.session)
+    };
+    let models = crate::platform::native::models_dir();
+    match crate::platform::native::ai_benchmark(&models, model, &library, session) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("Benchmark failed: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// Transcribes a file and prints the real-time factor.

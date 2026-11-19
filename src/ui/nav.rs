@@ -12,10 +12,11 @@ const ROW_HEIGHT: f32 = 34.0;
 pub fn show(ui: &mut egui::Ui, view: &View, compact: bool, actions: &mut Vec<Action>) {
     let trashed = view.library.trashed_sessions().len();
     let trash_label = if trashed > 0 { format!("Trash ({trashed})") } else { "Trash".to_owned() };
-    let items: [(Screen, &str, &str); 5] = [
+    let items: [(Screen, &str, &str); 6] = [
         (Screen::Home, icons::HOME, "Home"),
         (Screen::Collections, icons::COLLECTIONS, "Collections"),
         (Screen::Tasks, icons::TASKS, "Tasks"),
+        (Screen::Study, icons::DEFINITION, "Study"),
         (Screen::Search, icons::SEARCH, "Search"),
         (Screen::Trash, icons::TRASH, &trash_label),
     ];

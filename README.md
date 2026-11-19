@@ -7,14 +7,24 @@ One Rust codebase runs as a native app on **Windows, macOS and Linux** and as a 
 ![Lectio in the browser](shots/web-sample.png)
 
 ## Features
-- [x] Courses and sessions
-- [x] Recording with start / pause / resume / stop
-- [x] Notes timestamped to the recording; one-tap labels (Important, Review, Task, Definition), renameable
-- [x] Playback timeline with note markers; click a note to seek to it
-- [x] Local-first storage (files on desktop, IndexedDB in the browser)
-- [ ] PDF slides next to the notes, photo and sketch notes, reading view
-- [ ] Transcription (local Whisper), search, audio clean-up, playback speed
-- [ ] Task list, study tools (summaries, quizzes, flashcards), Markdown/PDF export
+**Capture**
+- [x] Home page of sessions; courses; trash with 30-day restore
+- [x] Record from the microphone, the computer's audio, or both; pause/resume; live level meter
+- [x] Feed of timestamped notes, headings, photos, sketches and screenshots; one-tap labels (Heading, Important, Review, Task, Definition)
+- [x] PDF slides beside the feed; slides posted into the feed as the lecture moves on
+- [x] Live captions while recording
+
+**Refine**
+- [x] Offline transcription with Whisper (tiny / base / small), on the device; click a line to play from there
+- [x] Search across notes, transcripts and slide text
+- [x] Playback 0.5x–2x with pitch kept, ±10 s skips, noise reduction, voice boost, normalise
+- [x] Reading view with Copy all and Markdown export; hideable panels; light and dark themes
+
+**Study**
+- [x] Optional AI study tools: a small model on the device, Ollama, or an OpenAI-compatible endpoint with your own key. Every item cites the moment it came from
+- [x] Outline, Quiz me (with an offline fill-in-the-blank mode), flashcards with spaced repetition
+- [x] Tasks across courses, focus timer, dictionary look-ups (offline WordNet)
+- [ ] Formula notes, slide annotation, PDF/DOCX export, collections, full screen-reader support on the web, release builds
 
 ## Build and run
 Requires a recent stable Rust toolchain.
@@ -51,6 +61,7 @@ The design is written up in the open:
 
 ## Known limitations
 - The web version draws to a canvas, so screen readers can't read it yet (see PROBLEMS). The desktop app supports screen readers.
+- Local AI and transcription models are downloaded on first use (about 150 MB to 1 GB each, depending on the model).
 - Linux and Windows are verified in CI. Day-to-day testing is on macOS.
 
 ## License

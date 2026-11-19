@@ -4,7 +4,9 @@
 
 use lectio_core::clock::RecorderCommand;
 use lectio_core::dsp::FilterSettings;
-use lectio_core::prefs::SpeechModel;
+use lectio_core::CardId;
+use lectio_core::cards::Grade;
+use lectio_core::prefs::{AiProvider, SpeechModel};
 
 use crate::platform::CaptureSource;
 use lectio_core::material::SlideLink;
@@ -17,10 +19,26 @@ pub enum Screen {
     Home,
     Collections,
     Tasks,
+    /// Flashcards, quizzes and the focus timer (Phase 4a).
+    Study,
     Search,
     Trash,
     /// One session: slides, feed, audio stream, input bar.
     Workspace,
+}
+
+/// What a quiz is about (Phase 4a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuizScope {
+    Session(SessionId),
+    Course(CourseId),
+}
+
+/// A quiz answer as given.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Response {
+    Choice(usize),
+    Text(String),
 }
 
 /// The hideable workspace panels.
@@ -122,4 +140,40 @@ pub enum Action {
     TakeScreenshot,
     SaveScreenshot { x: f32, y: f32, w: f32, h: f32 },
     CloseScreenshot,
+
+    // ---- Phase 4a: study (ADR-021, ADR-022) ----
+    SetAiSettingsOpen(bool),
+    SetAiProvider(AiProvider),
+    /// Stores (or with an empty string forgets) the endpoint key.
+    SaveAiKey(String),
+    ProbeOllama,
+    PrepareAi,
+    ShowOutline(bool),
+    GenerateOutline,
+    OutlineToFeed,
+    StartQuiz { scope: QuizScope, count: usize, topics: Vec<String>, use_ai: bool },
+    Answer(Response),
+    NextQuestion,
+    EndQuiz,
+    /// `None` = every session.
+    MakeDefinitionCards(Option<SessionId>),
+    GenerateCards(SessionId),
+    StartReview,
+    RevealCard,
+    GradeCard(Grade),
+    EndReview,
+    DeleteCard(CardId),
+    SetTaskDone { session: SessionId, note: NoteId, done: bool },
+    SetTaskDue { session: SessionId, note: NoteId, due_unix_ms: Option<u64> },
+    StartFocus { course: CourseId, minutes: u32 },
+    PauseFocus,
+    ResumeFocus,
+    FinishFocus,
+    CancelFocus,
+    LookUp { word: String, session: Option<SessionId>, offset_ms: Option<u64> },
+    /// Adds sense `index` of the looked-up word to the feed as a Definition note.
+    DefinitionToFeed(usize),
+    CloseLookUp,
+    DownloadDictionary,
+    SetOnlineDictionary(bool),
 }

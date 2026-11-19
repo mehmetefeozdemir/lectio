@@ -4,27 +4,35 @@
 //! `cargo test` and reused unchanged by a future web (WASM) or mobile shell.
 //! See `docs/DECISIONS.md` ADR-003 and ADR-006.
 
+pub mod cards;
 pub mod clock;
+pub mod dictionary;
 pub mod dsp;
 mod error;
 mod ids;
 mod labels;
 pub mod export;
+pub mod focus;
 pub mod material;
+pub mod outline;
 mod model;
 pub mod prefs;
+pub mod prompts;
+pub mod quiz;
 pub mod realtime;
 pub mod resample;
 pub mod search;
+pub mod sources;
 pub mod storage;
 pub mod stretch;
 pub mod stream;
+pub mod tasks;
 pub mod timeline;
 pub mod trash;
 pub mod transcript;
 
 pub use error::ModelError;
-pub use ids::{CourseId, DeckId, NoteId, SessionId};
+pub use ids::{CardId, CourseId, DeckId, NoteId, SessionId};
 pub use labels::{Label, LabelKind, LabelSet};
 pub use model::{Course, Library, Note, NoteKind, Recording, SCHEMA_VERSION, Session};
 

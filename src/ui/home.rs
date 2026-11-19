@@ -21,10 +21,8 @@ pub fn show(ui: &mut egui::Ui, view: &View, buffers: &mut Buffers, actions: &mut
     match view.screen {
         Screen::Collections => collections(ui, view, buffers, actions),
         Screen::Trash => trash(ui, view, actions),
-        Screen::Tasks => {
-            let message = "Notes labelled Task will be collected here, across all sessions (Phase 4).";
-            widgets::empty_state(ui, icons::TASKS, "Tasks are coming soon", message, None);
-        }
+        Screen::Tasks => super::tasks::page(ui, view, buffers, actions),
+        Screen::Study => super::study::page(ui, view, buffers, actions),
         Screen::Search => super::search::page(ui, view, buffers, actions),
         Screen::Home | Screen::Workspace => home(ui, view, buffers, actions),
     }
@@ -50,7 +48,9 @@ fn home(ui: &mut egui::Ui, view: &View, buffers: &mut Buffers, actions: &mut Vec
     };
     let courses = view.library.courses();
     page_title(ui, "Sessions", &detail, |ui| {
-        if !courses.is_empty() && widgets::primary_button(ui, icons::PLUS, "New session", true).clicked() {
+        let new_session = !courses.is_empty() && widgets::primary_button(ui, icons::PLUS, "New session", true).clicked();
+        due_chip(ui, view, actions);
+        if new_session {
             match courses {
                 [only] => actions.push(Action::AddSession(only.id)),
                 _ => buffers.picking_course = !buffers.picking_course,
@@ -74,6 +74,18 @@ fn home(ui: &mut egui::Ui, view: &View, buffers: &mut Buffers, actions: &mut Vec
             session_card(ui, view, course, session, actions);
         }
     });
+}
+
+/// "3 cards due" next to "New session" (Phase 4a); opens the Study page.
+fn due_chip(ui: &mut egui::Ui, view: &View, actions: &mut Vec<Action>) {
+    let due = view.study.due_cards;
+    if due == 0 {
+        return;
+    }
+    let text = format!("{due} card{} due", if due == 1 { "" } else { "s" });
+    if widgets::neutral_chip(ui, Some(icons::DEFINITION), &text, true, "Review flashcards").clicked() {
+        actions.push(Action::GoTo(Screen::Study));
+    }
 }
 
 /// "New session" with several courses: pick which one it belongs to.

@@ -160,7 +160,11 @@ fn segments(ui: &mut egui::Ui, view: &View, transcript: &Transcript, actions: &m
                     let text = ui.scope(|ui| {
                         ui.set_max_width(width);
                         let words = RichText::new(&segment.text).size(size::CAPTION).color(p.text);
-                        ui.add(egui::Label::new(words).wrap().sense(sense))
+                        let (response, word) = widgets::word_label(ui, words, sense);
+                        if let Some(word) = word {
+                            actions.push(Action::LookUp { word, session: None, offset_ms: Some(segment.start_ms) });
+                        }
+                        response
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                         let label = format!("Copy the words at {} into the feed", format_offset(segment.start_ms));

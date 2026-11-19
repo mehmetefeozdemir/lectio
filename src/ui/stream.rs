@@ -21,24 +21,33 @@ const LEVEL_HEIGHT: f32 = 8.0;
 
 /// The right panel: an Audio | Transcript tab bar, then the chosen tab.
 pub fn show(ui: &mut egui::Ui, view: &View, session: &Session, actions: &mut Vec<Action>) {
-    let transcript_tab = view.prefs.show_transcript_tab;
-    ui.horizontal(|ui| {
-        for (on, icon, name) in [(false, icons::WAVEFORM, "Audio"), (true, icons::TRANSCRIPT, "Transcript")] {
-            let selected = transcript_tab == on;
+    // The Outline tab only exists with an AI provider (ADR-021).
+    let outline_tab = view.prefs.show_outline_tab && view.study.ai_on;
+    let current = if outline_tab { 2 } else { usize::from(view.prefs.show_transcript_tab) };
+    let mut tabs = vec![(0, icons::WAVEFORM, "Audio"), (1, icons::TRANSCRIPT, "Transcript")];
+    if view.study.ai_on {
+        tabs.push((2, icons::HEADING, "Outline"));
+    }
+    ui.horizontal_wrapped(|ui| {
+        for (index, icon, name) in tabs {
+            let selected = current == index;
             let color = if selected { palette(ui).accent } else { palette(ui).text_muted };
             let text = widgets::icon_text(icon, name, theme::semibold(size::SMALL), color);
             let tab = ui.add(egui::Button::selectable(selected, text));
             widgets::name(&tab, Role::Tab, &format!("{name} tab in the right panel"));
             if tab.clicked() {
-                actions.push(Action::ShowTranscript(on));
+                actions.push(Action::ShowOutline(index == 2));
+                if index < 2 {
+                    actions.push(Action::ShowTranscript(index == 1));
+                }
             }
         }
     });
     ui.add_space(space::XS);
-    if transcript_tab {
-        super::transcript::show(ui, view, session, actions);
-    } else {
-        audio(ui, view, session, actions);
+    match current {
+        2 => super::outline::show(ui, view, session, actions),
+        1 => super::transcript::show(ui, view, session, actions),
+        _ => audio(ui, view, session, actions),
     }
 }
 

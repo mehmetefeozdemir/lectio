@@ -263,8 +263,10 @@ fn body(ui: &mut egui::Ui, note: &Note, playback: bool, actions: &mut Vec<Action
     } else {
         RichText::new(&note.body).color(p.text)
     };
-    let sense = if playback { egui::Sense::click() } else { egui::Sense::hover() };
-    if ui.add(egui::Label::new(text).wrap().sense(sense)).clicked() && playback {
+    let (response, word) = widgets::word_label(ui, text, egui::Sense::click());
+    if let Some(word) = word.filter(|_| !note.body.is_empty()) {
+        actions.push(Action::LookUp { word, session: None, offset_ms: Some(note.offset_ms) });
+    } else if response.clicked() && playback {
         actions.push(Action::PlayFrom(note.offset_ms));
     }
 }

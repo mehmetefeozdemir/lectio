@@ -63,7 +63,11 @@ impl LectioApp {
                 self.library = self.library.with_preferences(prefs);
             }
             other => {
-                let rest = self.apply_speech(other).and_then(|a| self.apply_audio(a));
+                let rest = self
+                    .apply_speech(other)
+                    .and_then(|a| self.apply_audio(a))
+                    .and_then(|a| self.apply_study(a))
+                    .and_then(|a| self.apply_organize(a));
                 if let Some(action) = rest {
                     self.apply_material(action);
                 }

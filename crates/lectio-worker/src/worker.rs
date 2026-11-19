@@ -7,6 +7,7 @@ use std::rc::Rc;
 use js_sys::{Array, Float32Array, Promise, Uint8Array};
 use lectio_speech::Engine;
 use lectio_speech::job::{Transcription, caption};
+use lectio_llm::protocol::ToStudy;
 use lectio_speech::protocol::{FromWorker, ToWorker};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
@@ -24,7 +25,7 @@ struct State {
     cancel: Cell<bool>,
 }
 
-fn scope() -> DedicatedWorkerGlobalScope {
+pub(crate) fn scope() -> DedicatedWorkerGlobalScope {
     js_sys::global().unchecked_into()
 }
 
@@ -54,7 +55,13 @@ pub fn start() {
         let Some(json) = parts.get(0).as_string() else { return };
         let command = match serde_json::from_str::<ToWorker>(&json) {
             Ok(command) => command,
-            Err(e) => return fail(None, format!("speech worker: bad message ({e})")),
+            // Not a speech command: perhaps a study one (ADR-021).
+            Err(speech_error) => {
+                return match serde_json::from_str::<ToStudy>(&json) {
+                    Ok(study) => super::study::handle(study, &parts.iter().skip(1).collect::<Vec<_>>()),
+                    Err(_) => fail(None, format!("worker: bad message ({speech_error})")),
+                };
+            }
         };
         if command == ToWorker::Cancel {
             receiver.cancel.set(true);
@@ -70,6 +77,7 @@ pub fn start() {
     scope().set_onmessage(Some(on_message.as_ref().unchecked_ref()));
     // The handler lives as long as the worker does.
     on_message.forget();
+    super::study::started();
 }
 
 async fn run(state: Rc<State>) {
@@ -88,7 +96,7 @@ async fn run(state: Rc<State>) {
     state.running.set(false);
 }
 
-fn bytes(buffers: &[JsValue], index: usize) -> Vec<u8> {
+pub(crate) fn bytes(buffers: &[JsValue], index: usize) -> Vec<u8> {
     buffers.get(index).map(|b| Uint8Array::new(b).to_vec()).unwrap_or_default()
 }
 

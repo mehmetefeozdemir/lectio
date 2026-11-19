@@ -25,6 +25,11 @@ mod timeline;
 mod transcript;
 mod screen_crop;
 mod search;
+mod study;
+mod tasks;
+mod ai_settings;
+mod outline;
+mod define;
 pub mod widgets;
 mod workspace;
 
@@ -37,7 +42,10 @@ use lectio_core::{LabelKind, LabelSet, Library, NoteId, SessionId};
 
 use crate::action::{Action, Panel, Screen};
 use crate::material::MaterialState;
+use crate::action::QuizScope;
+use crate::app::{LookUpState, QuizRun, ReviewRun};
 use crate::platform::CaptureSource;
+use lectio_core::CourseId;
 pub use sketch::SketchPad;
 use theme::{palette, radius, size, space};
 
@@ -101,6 +109,38 @@ pub struct View<'a> {
     pub cleaning: bool,
     /// The open session has a cleaned copy.
     pub has_cleaned: bool,
+    /// Phase 4a: AI study tools, quizzes, flashcards, tasks, focus, dictionary.
+    pub study: StudyView<'a>,
+    /// Wall-clock time for due dates and the focus timer.
+    pub now_ms: u64,
+}
+
+/// What the study views need (Phase 4a).
+pub struct StudyView<'a> {
+    /// A provider is chosen and this window has the AI layer.
+    pub ai_on: bool,
+    /// This window has the AI layer at all (not sample data).
+    pub ai_available: bool,
+    pub settings_open: bool,
+    pub has_key: bool,
+    pub ollama: Option<&'a Option<Vec<String>>>,
+    pub download: Option<(u64, u64)>,
+    pub ready: bool,
+    pub last_timing: Option<(usize, f64)>,
+    pub local_downloaded: [bool; 2],
+    pub local_unavailable: [Option<&'static str>; 2],
+    /// (what, chunk done, chunks) of the running AI job.
+    pub job: Option<(&'static str, usize, usize)>,
+    pub quiz: Option<&'a QuizRun>,
+    pub review: Option<&'a ReviewRun>,
+    pub due_cards: usize,
+    /// (course, remaining ms, running) of the focus timer.
+    pub focus: Option<(CourseId, u64, bool)>,
+    pub lookup: Option<&'a LookUpState>,
+    pub dictionary_available: bool,
+    pub dictionary_ready: bool,
+    pub dict_download: Option<(u64, u64)>,
+    pub dict_indexing: bool,
 }
 
 /// What the transcript, captions and search views need.
@@ -138,6 +178,24 @@ pub struct Buffers {
     pub slide_search: String,
     /// Screenshot crop: drag start and end (fractions of the picture).
     pub crop: Option<(egui::Pos2, egui::Pos2)>,
+    /// Phase 4a: AI settings fields (the key is only held while typed).
+    pub ai_base_url: String,
+    pub ai_model: String,
+    pub ai_key: String,
+    /// Quiz set-up and the typed answer.
+    pub quiz_scope: Option<QuizScope>,
+    pub quiz_count: usize,
+    pub quiz_topics: Vec<String>,
+    pub quiz_use_ai: bool,
+    pub quiz_text: String,
+    /// Focus timer set-up.
+    pub focus_course: Option<CourseId>,
+    pub focus_minutes: u32,
+    /// Tasks page filter.
+    pub task_course: Option<CourseId>,
+    pub task_show_done: bool,
+    /// Which session AI-written flashcards come from.
+    pub card_session: Option<SessionId>,
 }
 
 impl Buffers {
@@ -197,6 +255,8 @@ pub fn draw(ui: &mut egui::Ui, view: &View, buffers: &mut Buffers, banner: Optio
     sketch::window(ui.ctx(), buffers, actions);
     camera::window(ui.ctx(), view, actions);
     screen_crop::window(ui.ctx(), view, buffers, actions);
+    ai_settings::window(ui.ctx(), view, buffers, actions);
+    define::window(ui.ctx(), view, actions);
     undo_toast(ui.ctx(), view, actions);
 }
 
@@ -220,13 +280,20 @@ fn toolbar(ui: &mut egui::Ui, view: &View, actions: &mut Vec<Action>) {
 /// Settings menu and the theme switch (right side of every toolbar).
 pub fn settings_and_theme(ui: &mut egui::Ui, view: &View, actions: &mut Vec<Action>) {
     let p = palette(ui);
-    ui.menu_button(widgets::icon(icons::SETTINGS, size::ICON_LARGE, p.text_muted), |ui| {
+    let menu = ui.menu_button(widgets::icon(icons::SETTINGS, size::ICON_LARGE, p.text_muted), |ui| {
         if ui.button(widgets::icon_text(icons::TAG, "Rename labels…", theme::regular(size::CAPTION), p.text)).clicked() {
             actions.push(Action::OpenLabelEditor);
         }
-    })
-    .response
-    .on_hover_text("Settings");
+        let ai = widgets::icon_text(icons::DEFINITION, "AI study tools and dictionary…", theme::regular(size::CAPTION), p.text);
+        let open_ai = ui.button(ai);
+        widgets::name(&open_ai, egui::Role::Button, "AI study tools and dictionary");
+        if open_ai.clicked() {
+            actions.push(Action::SetAiSettingsOpen(true));
+        }
+    });
+    widgets::name(&menu.response, egui::Role::Button, "Settings");
+    menu.response.on_hover_text("Settings");
+    study::focus_chip(ui, view, actions);
     let icon = match view.theme {
         ThemePreference::System => icons::SYSTEM,
         ThemePreference::Light => icons::SUN,

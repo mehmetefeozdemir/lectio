@@ -20,6 +20,8 @@ pub enum ModelError {
     UnsupportedFile,
     FileTooLarge { max_mb: u64 },
     NoRecording,
+    NotATask,
+    InvalidStudyItem(String),
 }
 
 impl fmt::Display for ModelError {
@@ -49,6 +51,8 @@ impl fmt::Display for ModelError {
             }
             Self::FileTooLarge { max_mb } => write!(f, "That file is too large (the limit is {max_mb} MB)."),
             Self::NoRecording => write!(f, "This session has no recording yet."),
+            Self::NotATask => write!(f, "Only notes labelled Task can be marked done or given a due date."),
+            Self::InvalidStudyItem(why) => write!(f, "{why}"),
         }
     }
 }

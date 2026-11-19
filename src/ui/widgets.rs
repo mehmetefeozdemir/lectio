@@ -231,3 +231,47 @@ pub fn paint_label_marker(painter: &egui::Painter, kind: LabelKind, center: egui
 pub fn paint_centered(painter: &egui::Painter, rect: Rect, text: &str, font: egui::FontId, color: Color32) {
     painter.text(rect.center(), Align2::CENTER_CENTER, text, font, color);
 }
+
+/// A wrapped label whose words can be double-clicked (to look them up,
+/// ADR-022). Returns the response (a single click still works) and the
+/// double-clicked word, if any.
+pub fn word_label(ui: &mut egui::Ui, text: RichText, sense: Sense) -> (Response, Option<String>) {
+    let (pos, galley, response) = egui::Label::new(text).wrap().sense(sense | Sense::click()).layout_in_ui(ui);
+    ui.painter().galley(pos, galley.clone(), ui.visuals().text_color());
+    let word = response
+        .double_clicked()
+        .then(|| response.interact_pointer_pos())
+        .flatten()
+        .and_then(|pointer| word_around(galley.text(), galley.cursor_from_pos(pointer - pos).index.0));
+    (response.on_hover_text("Double-click a word to look it up"), word)
+}
+
+/// The word (letters, digits, `-`, `'`) at character `index` of `text`.
+pub fn word_around(text: &str, index: usize) -> Option<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let part_of_word = |c: char| c.is_alphanumeric() || c == '-' || c == '\'';
+    let at = index.min(chars.len().saturating_sub(1));
+    let at = if chars.get(at).is_some_and(|c| part_of_word(*c)) { at } else { at.checked_sub(1)? };
+    if !chars.get(at).is_some_and(|c| part_of_word(*c)) {
+        return None;
+    }
+    let start = (0..=at).rev().take_while(|&i| part_of_word(chars[i])).last()?;
+    let end = (at..chars.len()).take_while(|&i| part_of_word(chars[i])).last()?;
+    let word: String = chars[start..=end].iter().collect::<String>().trim_matches(['-', '\'']).to_owned();
+    (!word.is_empty()).then_some(word)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::word_around;
+
+    #[test]
+    fn the_word_under_the_pointer_is_found() {
+        let text = "BFS uses a queue, not a stack.";
+        assert_eq!(word_around(text, 12).as_deref(), Some("queue"));
+        assert_eq!(word_around(text, 16).as_deref(), Some("queue"), "just after the word");
+        assert_eq!(word_around(text, 0).as_deref(), Some("BFS"));
+        assert_eq!(word_around("depth-first search", 3).as_deref(), Some("depth-first"));
+        assert_eq!(word_around(" , ", 1), None);
+    }
+}

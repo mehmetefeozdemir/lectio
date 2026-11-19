@@ -47,7 +47,8 @@ jobs:
             libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
             libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             libgl1-mesa-dev \
-            libpipewire-0.3-dev libspa-0.2-dev libclang-dev clang libdbus-1-dev
+            libpipewire-0.3-dev libspa-0.2-dev libclang-dev clang libdbus-1-dev \
+            libgbm-dev libegl1-mesa-dev libdrm-dev
 
       - name: Build
         run: cargo build --workspace --locked

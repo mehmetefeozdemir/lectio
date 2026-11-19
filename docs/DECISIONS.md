@@ -483,3 +483,83 @@
 - **Decision:** transcripts have no speaker labels in Phase 3. The `Segment` type can gain an optional speaker field with a
   serde default later without breaking saved files.
 - **Consequences:** a lecture is treated as one voice; questions from students appear in the same transcript.
+
+## ADR-021: AI study tools behind a `StudyModel` provider layer: a local model, Ollama, or an OpenAI-compatible endpoint
+- **Date:** 2026-11-19
+- **Status:** accepted (written before the code)
+- **Context:** Phase 4 adds an outline of a session, quizzes and flashcards made from the user's own lecture material. The
+  spec asks for local-first behaviour, works with no AI at all (features hidden, never broken), and a pluggable provider.
+  Answers must be checkable: every generated item cites the moments and slides it came from.
+- **Options considered (the local model):**
+
+  | candidate | size (download) | licence | notes |
+  |---|---|---|---|
+  | **Qwen2.5-0.5B-Instruct**, GGUF Q4_K_M | 469 MB | Apache-2.0 | best instruction following at this size; supported by candle's `quantized_qwen2`; small enough for a browser tab |
+  | SmolLM2-360M-Instruct, GGUF Q8_0 | 369 MB | Apache-2.0 | smaller, but noticeably weaker at following an output format |
+  | Llama-3.2-1B-Instruct | ≈ 0.8 GB (Q4) | Llama 3.2 Community Licence, gated | download requires an account and accepting terms, so it can't be fetched by the app |
+  | Phi-3.5-mini-instruct | ≈ 2.3 GB (Q4) | MIT | good quality, but too large for a browser tab and slow on a laptop CPU |
+
+  I chose **Qwen2.5-0.5B-Instruct** as the default on every target, and offer **Qwen2.5-1.5B-Instruct** (1.1 GB, Apache-2.0,
+  same tokenizer) on the desktop for better answers. Both use the same pattern as Whisper (ADR-016): files from a pinned
+  revision, sizes and SHA-256 in the code, download on first use with progress, run on a desktop thread or in the browser's
+  Web Worker.
+- **Options considered (the layer):** one hard-wired provider (simplest, but no choice and no offline/online trade-off); a
+  plug-in system loading code at run time (overkill); **a small trait with three implementations (chosen)**.
+- **Decision:**
+  - **`StudyModel`** (in `platform/ai.rs`): "complete this chat (system + user text, at most N tokens)" plus "is it ready"
+    and progress events. Implementations: **Local** (Qwen via candle, `crates/lectio-llm`), **Ollama** (any model the user
+    has pulled, at `http://localhost:11434`, detected with `/api/tags`), **OpenAI-compatible** (any `/v1/chat/completions`
+    endpoint: a base URL, a model name, and the user's key).
+  - **No provider = AI hidden.** The Outline tab and the "with AI" buttons only appear when a provider is set and ready.
+    Offline fallbacks don't need AI: a cloze quiz from Definition notes and flashcards from Definition notes.
+  - **Keys** are stored apart from the library (a `secrets.json` readable only by the user on the desktop, the browser's own
+    storage on the web), never put in `library.json` (which a user may share), never shown in errors or logs (the `Debug`
+    output of the settings is redacted).
+  - **Citations:** the material sent to a model is a numbered list, one line per source, e.g.
+    `[S12] (17:05) BFS visits vertices in order of distance` or `[S30] (slide 2) Queue, distance order`. The model must
+    end each item with the source numbers it used; Lectio maps them back to moments and slides (`lectio_core::sources`).
+    Items with no valid source are dropped, so nothing appears without a place to check it.
+  - **Long sessions are chunked:** sources are packed in time order into chunks under a token budget (4 characters ≈ 1
+    token); a single over-long source is cut at a word with "…"; a whole collection keeps an even sample of chunks within a
+    limit. Each chunk gets its own request; results are merged in time order.
+  - **Output format:** small models follow simple line formats far better than JSON, so prompts ask for lines like
+    `[S12] Title` (outline) or `Q:` / `A)`…`D)` / `Answer:` / `Why:` / `Sources:` blocks (quiz); parsers ignore anything else.
+- **Consequences:** the first local use downloads 469 MB; quality is that of a 0.5B model (good enough for outlines and
+  simple questions, weaker on subtle ones), so the user can switch to the 1.5B model, Ollama, or an endpoint. In the browser
+  Ollama only works when the page is served from `localhost` (its default allowed origins), and an endpoint must allow CORS.
+- **Changes after building it (2026-11-19):**
+  - **Prompts show a worked example instead of a template.** With a template (`A) choice`) the 0.5B model copied the
+    placeholders back (P-032). Each prompt now ends with a short, real example on a different topic (the solar system), and
+    the parsers drop placeholder answers, duplicate choices, and items that copy a source line word for word.
+  - **Citations can be inferred.** The 0.5B model often leaves out `[S12]` even when the example shows it. Rather than drop
+    a good item, Lectio cites the source that shares the most distinctive words with it (at least two words of three or more
+    letters, not in a short list of common words; `sources::best_match`). If nothing matches well enough, the item is still
+    dropped, so the rule "nothing without a place to check it" holds. I preferred this to asking again, which doubles the
+    wait and usually gives the same answer. The same check also catches *wrong* numbers: a cited line sharing fewer than
+    two such words with the item is replaced by the best match, when there is one (`sources::checked_ids`, P-036).
+  - **Too little material is refused up front.** Under about 600 characters (`MIN_OUTLINE_TOKENS` = 150) an outline can
+    only repeat the notes, so Lectio says so instead of calling a model.
+  - **Browser builds use WebAssembly SIMD** (`.cargo/config.toml`), without which candle's quantized kernels are not
+    compiled and the model is far too slow (P-035). This raises the minimum browsers to Chrome 91, Firefox 89 and
+    Safari 16.4.
+  - **In the browser the study model runs in its own worker.** The page starts a second copy of the worker program for it
+    (`lectio_llm::protocol`), because each worker has its own WebAssembly memory (at most 4 GB): Whisper and Qwen never have
+    to fit in one. Downloads are assembled in a JavaScript buffer, not WebAssembly memory, which can grow but never shrinks.
+  - **Measured on an M2 MacBook (desktop, release build):** 0.5B reads the prompt at about 80 tokens/s and writes about
+    46 tokens/s; 1.5B about 140 and 32 tokens/s (`lectio --ai-benchmark small|large` reproduces this).
+
+## ADR-022: Definitions: Open English WordNet, downloaded on demand; an online dictionary behind the same trait
+- **Date:** 2026-11-19
+- **Status:** accepted
+- **Context:** Looking up a word in a note or the transcript should work offline, with an optional online source.
+- **Options considered:** bundling a dictionary in the app (a useful English dictionary is tens of MB, too much for every web
+  page load); WordNet 3.0 (old); **Open English WordNet** (CC BY 4.0, maintained; the 2023 edition as one JSON Lines file on
+  Hugging Face, which a browser may download); Wiktionary extracts (CC BY-SA, much larger, messy markup);
+  dictionaryapi.dev (free, no key, online only).
+- **Decision:** a `DictionaryProvider` trait with two providers. **Offline (default):** Open English WordNet 2023, downloaded
+  on first use from a pinned revision (49 MB, SHA-256 checked), then converted once into a compact tab-separated index
+  (word → part of speech, definition, example) kept on the device. Lookups try simple base forms (plurals, -ing, -ed).
+  **Online (off by default):** dictionaryapi.dev. A definition can be added to the feed as a Definition note.
+- **Consequences:** English only; the attribution "Open English WordNet (CC BY 4.0)" is shown with every offline result.
+  In the browser the index is built by a short-lived copy of the worker (so the page doesn't freeze while 49 MB of JSON is
+  read) and kept in IndexedDB; it is read into memory on the first look-up.

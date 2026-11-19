@@ -8,7 +8,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::labels::validated_name;
 use crate::material::{Attachment, SlideDeck, SlideLink};
+use crate::cards::Card;
+use crate::focus::FocusEntry;
+use crate::outline::Outline;
 use crate::prefs::Preferences;
+use crate::quiz::QuizAttempt;
+use crate::tasks::TaskInfo;
 use crate::transcript::Transcript;
 use crate::{CourseId, LabelKind, LabelSet, ModelError, NoteId, SessionId};
 
@@ -16,8 +21,9 @@ use crate::{CourseId, LabelKind, LabelSet, ModelError, NoteId, SessionId};
 /// 1 = Phase 1. 2 = Phase 2 (slide decks, slide links, photo/sketch notes).
 /// 3 = session workflow (Heading label, slide items, trash, preferences).
 /// 4 = Phase 3 (transcripts, slide text, cleaned audio copy, audio settings).
+/// 5 = Phase 4a (outline, quiz attempts, task state, flashcards, focus log, AI settings).
 /// Older files still load because every new field has a default.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 /// What a feed item is. Older files have no `kind`: they are text notes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -49,6 +55,9 @@ pub struct Note {
     /// a separate blob (ADR-012).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachment: Option<Attachment>,
+    /// Done / due date of a Task note (Phase 4a); `None` = open, no date.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<TaskInfo>,
 }
 
 impl Note {
@@ -91,6 +100,12 @@ pub struct Session {
     /// Speech-to-text of the recording (Phase 3), aligned to its timeline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcript: Option<Transcript>,
+    /// A generated outline (Phase 4a, ADR-021).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outline: Option<Outline>,
+    /// Quiz scores, oldest first (Phase 4a).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub quiz_attempts: Vec<QuizAttempt>,
 }
 
 impl Session {
@@ -110,7 +125,8 @@ pub struct Course {
     pub sessions: Vec<Session>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// `PartialEq` only: flashcards keep their SM-2 ease as a float.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Library {
     schema_version: u32,
     courses: Vec<Course>,
@@ -118,11 +134,24 @@ pub struct Library {
     /// The user's layout and theme choices (saved with the library).
     #[serde(default)]
     preferences: Preferences,
+    /// Flashcards of every session (Phase 4a).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) cards: Vec<Card>,
+    /// Finished focus-timer sessions (Phase 4a).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) focus_log: Vec<FocusEntry>,
 }
 
 impl Default for Library {
     fn default() -> Self {
-        Self { schema_version: SCHEMA_VERSION, courses: Vec::new(), labels: LabelSet::default(), preferences: Preferences::default() }
+        Self {
+            schema_version: SCHEMA_VERSION,
+            courses: Vec::new(),
+            labels: LabelSet::default(),
+            preferences: Preferences::default(),
+            cards: Vec::new(),
+            focus_log: Vec::new(),
+        }
     }
 }
 
@@ -155,6 +184,16 @@ impl Library {
     /// A copy with these courses (used by the trash to drop sessions).
     pub(crate) fn with_courses(&self, courses: Vec<Course>) -> Library {
         Library { courses, ..self.clone() }
+    }
+
+    /// A copy with these flashcards (see `cards.rs`).
+    pub(crate) fn with_card_list(&self, cards: Vec<Card>) -> Library {
+        Library { cards, ..self.clone() }
+    }
+
+    /// A copy with this focus log (see `focus.rs`).
+    pub(crate) fn with_focus_log(&self, focus_log: Vec<FocusEntry>) -> Library {
+        Library { focus_log, ..self.clone() }
     }
 
     pub fn course(&self, id: CourseId) -> Option<&Course> {
@@ -195,6 +234,8 @@ impl Library {
             decks: Vec::new(),
             deleted_unix_ms: None,
             transcript: None,
+            outline: None,
+            quiz_attempts: Vec::new(),
         };
         let id = session.id;
         let next = self.map_course(course, |c| {
@@ -360,6 +401,7 @@ pub(crate) fn new_note(offset_ms: u64, body: &str, labels: &[LabelKind], attachm
         labels: unique_labels(labels),
         slide: None,
         attachment,
+        task: None,
     }
 }
 

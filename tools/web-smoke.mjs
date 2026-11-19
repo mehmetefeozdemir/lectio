@@ -40,6 +40,23 @@ import { dirname, join, resolve } from "node:path";
  * page as `index.html#test`.
  */
 const SAMPLE_PDF = new URL("../assets/sample-slides.pdf", import.meta.url).pathname;
+// Phase 4a: a short lecture's worth of notes (an outline needs about 600
+// characters of material, PROBLEMS P-036). [text, label or null]
+const LECTURE_NOTES = [
+  ["Today: three ways to search a graph, and what each one is good for", null],
+  ["Breadth-first search visits a graph level by level from the start vertex", null],
+  ["BFS keeps the vertices still to visit in a queue, so the closest ones come out first", null],
+  ["Queue: a list where the first item added is the first removed", "Definition"],
+  ["In an unweighted graph BFS gives the fewest edges from the start to every vertex", null],
+  ["Depth-first search follows one path as far as it goes, then backtracks to the last choice", null],
+  ["DFS uses a stack, or recursion, which uses the call stack for the same job", null],
+  ["Stack: a list where the last item added is the first removed", "Definition"],
+  ["DFS finds cycles and gives a topological order of a directed acyclic graph", null],
+  ["Dijkstra's algorithm finds shortest paths when no edge weight is negative", null],
+  ["It keeps a priority queue ordered by the best distance found so far", null],
+  ["Negative edge weights break Dijkstra; Bellman-Ford handles them more slowly", null],
+  ["Finish problem set 4 on graph search", "Task"],
+];
 const FLOWS = {
   // End to end: start on Home, add a course and a session, import a PDF
   // through the real file chooser, record (slide 1 is posted to the feed),
@@ -95,6 +112,44 @@ const FLOWS = {
     "--wait-stored", "segments>=3,600", "--wait", "1500", "--shot", "shots/phase3-web-transcript.png",
     "--click-name", "Back to sessions", "--wait", "500", "--click-name", "Search", "--wait", "500",
     "--click-name", "Search everything", "--type", "graph", "--wait", "800", "--shot", "shots/phase3-web-search-transcript.png",
+  ],
+  // Phase 4a, local only (downloads the 469 MB study model and the 47 MB
+  // dictionary): labelled notes, the Tasks page, flashcards from Definition
+  // notes, the offline quiz, then the study model writes an outline in its
+  // worker.
+  phase4a: [
+    "--click-name", "Add a course", "--type", "CSCA67", "--key", "Enter", "--wait", "500",
+    "--click-name", "New session", "--wait", "800",
+    "--click-name", "Start recording", "--wait", "1500",
+    ...LECTURE_NOTES.flatMap(([text, label]) =>
+      label
+        ? ["--click-name", "Note text", "--type", text, "--click-name", `Label this moment: ${label}`, "--wait", "400"]
+        : ["--click-name", "Note text", "--type", text, "--key", "Enter", "--wait", "400"],
+    ),
+    "--click-name", "Stop and save", "--wait", "2000",
+    "--click-name", "Back to sessions", "--wait", "800",
+    "--click-name", "Tasks", "--wait", "800", "--shot", "shots/phase4a-web-tasks.png",
+    "--click-name", "Study", "--wait", "800",
+    "--click-name", "Make cards from Definition notes", "--wait", "800",
+    "--expect-stored", "cards=2,tasks=1",
+    "--click-name", "Start the quiz", "--wait", "800",
+    "--click-name", "Your answer", "--type", "queue", "--click-name", "Check", "--wait", "500",
+    "--shot", "shots/phase4a-web-quiz.png",
+    "--click-name", "End the quiz", "--wait", "500",
+    "--expect-stored", "attempts=1",
+    "--click-name", "Settings", "--wait", "400", "--click-name", "AI study tools and dictionary", "--wait", "600",
+    "--click-name", "On this device", "--wait", "500",
+    "--click-name", "Download the dictionary", "--wait", "300",
+    "--click-name", "Download the study model", "--wait", "5000", "--shot", "shots/phase4a-web-ai-download.png",
+    "--wait-stored", "dictionary>=1,600",
+    "--click-name", "Close", "--wait", "300",
+    "--click-name", "Home", "--wait", "500",
+    "--click-name", "Session: Lecture 1", "--wait", "1500",
+    "--click-name", "Outline tab in the right panel", "--wait", "500",
+    "--click-name", "Write an outline", "--wait", "3000",
+    "--wait-stored", "outline>=2,900", "--wait", "1000", "--shot", "shots/phase4a-web-outline.png",
+    "--click-name", "Settings", "--wait", "400", "--click-name", "AI study tools and dictionary", "--wait", "600",
+    "--shot", "shots/phase4a-web-ai-ready.png",
   ],
 };
 
@@ -377,9 +432,17 @@ async function storedCounts(cdp) {
     });
     const json = await read("library", (s) => s.get("library.json"));
     const blobs = await read("blobs", (s) => s.count());
-    const sessions = JSON.parse(json).courses.flatMap((c) => c.sessions);
+    const library = JSON.parse(json);
+    const sessions = library.courses.flatMap((c) => c.sessions);
     const notes = sessions.flatMap((s) => s.notes);
+    const dictionary = await read("models", (s) => s.count("wordnet-index.tsv"));
     return {
+      // Phase 4a: outline items, flashcards, quiz attempts, Task notes, the dictionary index.
+      outline: sessions.flatMap((s) => (s.outline ? s.outline.items : [])).length,
+      cards: (library.cards || []).length,
+      attempts: sessions.flatMap((s) => s.quiz_attempts || []).length,
+      tasks: notes.filter((n) => (n.labels || []).includes("task")).length,
+      dictionary,
       notes: notes.length,
       linked: notes.filter((n) => n.slide).length,
       slides: notes.filter((n) => n.kind === "slide").length,

@@ -1,0 +1,7 @@
+# Browser builds use WebAssembly SIMD (128-bit vector instructions). candle
+# only uses its fast quantized kernels (the study model's Q4_K/Q6_K weights,
+# ADR-021) and runs Whisper faster with them; without them the
+# browser's study model was too slow to finish an outline (PROBLEMS P-035).
+# Supported since Chrome 91, Firefox 89 and Safari 16.4.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+simd128"]

@@ -6,8 +6,11 @@
 //! async work with `spawn_local` and the app polls for the result
 //! (`is_ready`, `take_error`, `take_background_error`) on later frames.
 
+mod ai;
 mod camera;
+mod dictionary;
 mod display;
+mod fetch;
 mod files;
 mod idb;
 mod player;
@@ -201,6 +204,40 @@ impl Platform for WebPlatform {
     fn supports_camera(&self) -> bool {
         true
     }
+
+    fn study_model(&self) -> Option<Box<dyn super::ai::StudyModel>> {
+        Some(Box::new(ai::WebStudyModel::start(self.db.clone())))
+    }
+
+    fn dictionary(&self) -> Option<Box<dyn super::dictionary::DictionaryService>> {
+        Some(Box::new(dictionary::WebDictionary::start(self.db.clone())))
+    }
+
+    /// Kept in this browser's `localStorage` for this page's address only,
+    /// apart from the library in IndexedDB (ADR-021).
+    fn load_secret(&self, name: &str) -> Option<String> {
+        local_storage().ok()?.get_item(&secret_key(name)).ok().flatten()
+    }
+
+    fn save_secret(&self, name: &str, value: Option<&str>) -> Result<(), String> {
+        let storage = local_storage()?;
+        let result = match value {
+            Some(value) => storage.set_item(&secret_key(name), value),
+            None => storage.remove_item(&secret_key(name)),
+        };
+        // The browser's error never includes the value, but say less anyway.
+        result.map_err(|_| "The browser refused to store the key (private window or storage full?).".to_owned())
+    }
+}
+
+fn secret_key(name: &str) -> String {
+    format!("lectio-secret:{name}")
+}
+
+fn local_storage() -> Result<web_sys::Storage, String> {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .ok_or_else(|| "This browser doesn't allow storing a key here.".to_owned())
 }
 
 /// A readable message from a JavaScript error value.

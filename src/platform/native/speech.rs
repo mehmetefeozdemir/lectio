@@ -5,7 +5,7 @@
 //! after the download and before each load.
 
 use std::fs::File;
-use std::io::{BufReader, Read, Write};
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -15,14 +15,11 @@ use std::time::Instant;
 use lectio_core::prefs::SpeechModel;
 use lectio_speech::Engine;
 use lectio_speech::job::{self, WindowDone};
-use lectio_speech::models::{self, Checksum, ModelFile, ModelInfo};
+use lectio_speech::models::{self, ModelFile, ModelInfo};
 
+use super::fetch::{self, file_has_size};
 use crate::platform::speech::{SpeechEvent, SpeechRequest, SpeechService};
 use crate::platform::wav::decode_mono_i16;
-
-/// Report download progress about every this many bytes.
-const PROGRESS_STEP: u64 = 1 << 20;
-const READ_BUFFER: usize = 1 << 16;
 
 pub struct NativeSpeech {
     requests: Sender<SpeechRequest>,
@@ -75,10 +72,6 @@ impl SpeechService for NativeSpeech {
 
 fn model_path(dir: &Path, info: &ModelInfo, file: &ModelFile) -> PathBuf {
     dir.join(format!("whisper-{}", info.model.name())).join(file.name)
-}
-
-fn file_has_size(path: &Path, bytes: u64) -> bool {
-    std::fs::metadata(path).is_ok_and(|m| m.len() == bytes)
 }
 
 fn files_present(dir: &Path, model: SpeechModel) -> bool {
@@ -200,7 +193,7 @@ pub fn load_model(dir: &Path, model: SpeechModel, progress: &mut dyn FnMut(u64, 
     for file in &info.files {
         let path = model_path(dir, info, file);
         if !file_has_size(&path, file.bytes) {
-            download(info, file, &path, done, total, progress)?;
+            fetch::download(&info.url(file), file, &path, done, total, progress)?;
         }
         done += file.bytes;
     }
@@ -219,47 +212,6 @@ pub fn load_model(dir: &Path, model: SpeechModel, progress: &mut dyn FnMut(u64, 
     let tokenizer = contents.pop().unwrap_or_default();
     let config = contents.pop().unwrap_or_default();
     Engine::load(&config, &tokenizer, weights)
-}
-
-/// Streams one file to `<name>.part`, checking it as it arrives, then
-/// renames it into place (so a half download is never mistaken for a file).
-fn download(
-    info: &ModelInfo,
-    file: &ModelFile,
-    path: &Path,
-    done_before: u64,
-    total: u64,
-    progress: &mut dyn FnMut(u64, u64),
-) -> Result<(), String> {
-    let dir = path.parent().ok_or("bad model folder")?;
-    std::fs::create_dir_all(dir).map_err(|e| format!("Could not create {}: {e}", dir.display()))?;
-    let part = path.with_extension("part");
-    let offline = |e: ureq::Error| format!("Could not download the speech model ({e}). Check the internet connection.");
-    let response = ureq::get(&info.url(file)).call().map_err(offline)?;
-    let mut reader = response.into_body().into_reader();
-    let mut out = File::create(&part).map_err(|e| format!("Could not save the model: {e}"))?;
-    let mut checksum = Checksum::default();
-    let mut buffer = vec![0u8; READ_BUFFER];
-    let (mut got, mut reported) = (0u64, 0u64);
-    loop {
-        let n = reader.read(&mut buffer).map_err(|e| format!("The download stopped: {e}"))?;
-        if n == 0 {
-            break;
-        }
-        out.write_all(&buffer[..n]).map_err(|e| format!("Could not save the model: {e}"))?;
-        checksum.update(&buffer[..n]);
-        got += n as u64;
-        if got - reported >= PROGRESS_STEP {
-            reported = got;
-            progress(done_before + got, total);
-        }
-    }
-    drop(out);
-    if let Err(problem) = checksum.check(file) {
-        let _ = std::fs::remove_file(&part);
-        return Err(problem);
-    }
-    std::fs::rename(&part, path).map_err(|e| format!("Could not save the model: {e}"))
 }
 
 /// `lectio --transcribe <file.wav> [--model tiny|base|small] [--language xx]`:

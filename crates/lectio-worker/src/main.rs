@@ -7,7 +7,13 @@
 //! transferred buffers; the worker answers with `FromWorker` messages.
 //! Commands run one at a time, in order; between 30-second windows the
 //! worker yields so that a "cancel" message can arrive.
+//!
+//! The same program also runs the local study model and builds the
+//! dictionary index (`lectio_llm::protocol`, ADR-021). The page starts a
+//! second copy of the worker for that, so each model gets its own memory.
 
+#[cfg(target_arch = "wasm32")]
+mod study;
 #[cfg(target_arch = "wasm32")]
 mod worker;
 

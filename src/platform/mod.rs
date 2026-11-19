@@ -15,6 +15,8 @@
 //! The rules (model, clock, seek maths, resampling) stay in `lectio-core`,
 //! which has no platform code and compiles for every target.
 
+pub mod ai;
+pub mod dictionary;
 pub mod speech;
 pub mod wav;
 
@@ -91,6 +93,25 @@ pub trait Platform {
     }
     fn supports_screenshot(&self) -> bool {
         false
+    }
+
+    // ---- Phase 4a: study (ADR-021, ADR-022) ----
+
+    /// Starts the AI provider layer (call once; it owns a thread or worker).
+    fn study_model(&self) -> Option<Box<dyn ai::StudyModel>> {
+        None
+    }
+    /// Starts the dictionary service (call once).
+    fn dictionary(&self) -> Option<Box<dyn dictionary::DictionaryService>> {
+        None
+    }
+    /// A secret (an API key) kept apart from the library; never logged.
+    fn load_secret(&self, _name: &str) -> Option<String> {
+        None
+    }
+    /// Stores (or with `None` forgets) a secret.
+    fn save_secret(&self, _name: &str, _value: Option<&str>) -> Result<(), String> {
+        Err("Keys can't be stored in this window.".into())
     }
 }
 

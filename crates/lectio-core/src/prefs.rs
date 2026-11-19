@@ -59,6 +59,13 @@ pub struct Preferences {
     pub language: Option<String>,
     /// The right panel shows the transcript instead of the audio stream.
     pub show_transcript_tab: bool,
+    /// The right panel shows the outline (wins over the transcript tab).
+    pub show_outline_tab: bool,
+    /// Which AI provider the study tools use (ADR-021). The key for an
+    /// OpenAI-compatible endpoint is never stored here.
+    pub ai: AiProvider,
+    /// Look words up online when the offline dictionary has nothing (ADR-022).
+    pub online_dictionary: bool,
 }
 
 impl Default for Preferences {
@@ -75,6 +82,44 @@ impl Default for Preferences {
             speech_model: SpeechModel::Tiny,
             language: None,
             show_transcript_tab: false,
+            show_outline_tab: false,
+            ai: AiProvider::None,
+            online_dictionary: false,
         }
+    }
+}
+
+/// The local study models (ADR-021).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalModel {
+    /// Qwen2.5-0.5B-Instruct: every target.
+    #[default]
+    Small,
+    /// Qwen2.5-1.5B-Instruct: desktop only, better answers.
+    Large,
+}
+
+impl LocalModel {
+    pub const ALL: [LocalModel; 2] = [LocalModel::Small, LocalModel::Large];
+}
+
+/// Where AI study tools get their answers. `None` hides them (ADR-021).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AiProvider {
+    #[default]
+    None,
+    /// A model run by Lectio itself, downloaded on first use.
+    Local { model: LocalModel },
+    /// Ollama on this computer (`http://localhost:11434`).
+    Ollama { model: String },
+    /// Any OpenAI-compatible chat endpoint; the key is kept elsewhere.
+    OpenAi { base_url: String, model: String },
+}
+
+impl AiProvider {
+    pub fn is_set(&self) -> bool {
+        *self != AiProvider::None
     }
 }
