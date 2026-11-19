@@ -195,3 +195,29 @@ fn the_stretcher_reads_16_bit_samples_too() {
 
     assert!((out[50] - 5_000.0 / f32::from(i16::MAX)).abs() < 1e-4);
 }
+
+
+/// Regression: playing to the very end at a non-1x speed used to panic with
+/// "index out of bounds: the len is N but the index is N" in `best_match`,
+/// when the search window near the end lay past the last full piece.
+#[test]
+fn every_speed_plays_to_the_end_of_any_length_without_panicking() {
+    use lectio_core::stretch::{SPEEDS, TimeStretcher};
+    for len in [0usize, 1, 100, 639, 640, 641, 1_000, 16_000, 16_317, 352_768] {
+        let source: Vec<i16> = (0..len).map(|i| ((i as f32 * 0.05).sin() * 8_000.0) as i16).collect();
+        for &speed in &SPEEDS {
+            let mut stretcher = TimeStretcher::new(16_000);
+            stretcher.set_speed(speed);
+            let mut out = vec![0.0f32; 512];
+            let mut guard = 0;
+            loop {
+                let written = stretcher.render(source.as_slice(), &mut out);
+                guard += 1;
+                if written < out.len() || guard > 100_000 {
+                    break;
+                }
+            }
+            assert!(guard <= 100_000, "len {len} at {speed}% never reached the end");
+        }
+    }
+}

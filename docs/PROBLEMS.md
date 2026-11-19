@@ -487,4 +487,13 @@ Every bug, dead end and wrong turn while building Lectio, with the root cause, w
 - **Symptom:** The `native (ubuntu-latest)` job compiled everything and then failed at the final link step: `rust-lld: error: unable to find library -lgbm`. Windows, macOS and the web build passed.
 - **Root cause:** The screenshot library (`xcap`) captures Wayland screens through `libwayshot`, which links to the system's GBM library (Mesa's buffer manager). The CI image had PipeWire and DBus installed for system audio but not GBM. I couldn't see this on a Mac because Linux can't be linked from macOS (see the earlier Linux type-check problem).
 - **Fix:** Added `libgbm-dev` to the CI's Linux packages, plus `libegl1-mesa-dev` and `libdrm-dev`, which the same capture path uses.
+- **Verified:** The next CI run (44633484797) passed on all four jobs, Linux included.
 - **Lesson:** Adding a dependency with native code means checking which system libraries it links on every OS, not only whether it compiles. The CI matrix is what caught it.
+
+## P-039: The app crashed at the end of playback at a non-1x speed
+- **Phase:** 3 (found in manual testing after Phase 4a)
+- **Symptom:** The desktop app aborted with `panicked at crates/lectio-core/src/stretch.rs:70:19: index out of bounds: the len is 352768 but the index is 352768`.
+- **Root cause:** At speeds other than 1x, `TimeStretcher::best_match` searches ±10 ms around the next piece for the best waveform match. Near the end of a recording the window's lower bound (`nominal - search`) could be larger than its upper bound (`len - frame`). The loop ran `lowest..=highest.max(lowest)`, so it still tried `candidate = lowest`, and `candidate + i` read exactly one sample past the end. The existing tests played to the end only at lengths where this window never inverted.
+- **Fix:** If the window is empty (`lowest > highest`), `best_match` returns `nominal`, and `next_piece` already stops cleanly when a full piece no longer fits. The loop now only runs over valid candidates.
+- **Test:** `every_speed_plays_to_the_end_of_any_length_without_panicking` plays 10 recording lengths (0 to 352,768 samples, including the crashing one) at all 7 speeds to the end. It fails with the same panic on the old code and passes on the new code.
+- **Lesson:** Boundary bugs hide at the end of buffers. A test that sweeps lengths and parameters together catches cases a few hand-picked examples miss.

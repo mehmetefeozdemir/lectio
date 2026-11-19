@@ -195,8 +195,14 @@ impl TimeStretcher {
         }
         let lowest = nominal.saturating_sub(self.search);
         let highest = (nominal + self.search).min(len.saturating_sub(self.frame));
-        let mut best = (nominal.min(highest.max(lowest)), f32::MIN);
-        for candidate in lowest..=highest.max(lowest) {
+        // Near the end of the recording the search window can lie wholly past
+        // the last full piece (lowest > highest). Any candidate there would
+        // read past the end, so keep `nominal` and let `next_piece` stop.
+        if lowest > highest {
+            return nominal;
+        }
+        let mut best = (nominal.clamp(lowest, highest), f32::MIN);
+        for candidate in lowest..=highest {
             let score: f32 = (0..self.hop)
                 .step_by(SEARCH_STRIDE)
                 .map(|i| source.at(candidate + i) * source.at(natural + i))
