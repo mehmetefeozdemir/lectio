@@ -14,12 +14,12 @@ use crate::ui::SketchPad;
 const NEEDS_TIMELINE: &str = "Start recording (or open a recorded session) to add photos and sketches to its timeline.";
 
 /// One image to store as a note.
-struct NewImage {
-    kind: AttachmentKind,
-    media: MediaKind,
-    bytes: Vec<u8>,
-    width: u32,
-    height: u32,
+pub(super) struct NewImage {
+    pub(super) kind: AttachmentKind,
+    pub(super) media: MediaKind,
+    pub(super) bytes: Vec<u8>,
+    pub(super) width: u32,
+    pub(super) height: u32,
 }
 
 impl LectioApp {
@@ -64,7 +64,26 @@ impl LectioApp {
             let load = |key: &BlobKey| load_blob_from(platform, samples, key);
             self.material.ensure_loaded(session, &load);
         }
-        self.material.update_textures(ctx)
+        let busy = self.material.update_textures(ctx);
+        self.store_slide_texts();
+        busy
+    }
+
+    /// Saves the page text read from decks (for search, ADR-018).
+    fn store_slide_texts(&mut self) {
+        let Some(session) = self.selected else { return };
+        let texts = self.material.take_texts();
+        if texts.is_empty() {
+            return;
+        }
+        for (deck, text) in texts {
+            // A deck with no readable text still gets one (empty) entry per
+            // page, so it isn't read again on every visit.
+            if let Ok(library) = self.library.with_slide_text(session, deck, text) {
+                self.library = library;
+            }
+        }
+        self.persist();
     }
 
     fn start_import(&mut self, kind: FileKind) {
@@ -167,7 +186,7 @@ impl LectioApp {
 
     /// Stores the image as a blob first, then adds the note that refers to it,
     /// so a note never points at a file that doesn't exist (ADR-012).
-    fn add_image_note(
+    pub(super) fn add_image_note(
         &mut self,
         session: SessionId,
         offset_ms: u64,

@@ -7,6 +7,8 @@
 mod material_actions;
 mod ui_state;
 mod workflow;
+mod audio_actions;
+mod speech_actions;
 
 use std::collections::HashMap;
 
@@ -18,7 +20,10 @@ use lectio_core::{LabelKind, Library, ModelError, NoteId, Recording, SessionId};
 
 use crate::action::Action;
 use crate::material::MaterialState;
-use crate::platform::{AudioCapture, AudioPlayback, Pending, Platform, STORE_SAMPLE_RATE, now_unix_ms};
+use crate::platform::{
+    AudioCapture, AudioPlayback, CaptureSource, Pending, Platform, STORE_SAMPLE_RATE, now_unix_ms,
+};
+use lectio_core::dsp::FilterSettings;
 use crate::ui::{self, Banner, Buffers, View};
 
 /// How often to redraw while recording or playing, so the clock moves.
@@ -69,6 +74,8 @@ pub struct LectioApp {
     sample_blobs: HashMap<BlobKey, Vec<u8>>,
     /// Redesign (ADR-014): undo, level meter, panel and theme choices.
     ui_state: ui_state::UiState,
+    /// Phase 3 (ADR-016): the speech service, transcription, captions, search.
+    speech: speech_actions::SpeechState,
     #[cfg(not(target_arch = "wasm32"))]
     screenshot: Option<crate::screenshot::ScreenshotDriver>,
 }
@@ -85,6 +92,7 @@ impl LectioApp {
             },
         };
         app.purge_expired_trash();
+        app.speech.service = app.platform.as_ref().filter(|_| app.can_save).and_then(|p| p.speech());
         // The saved theme choice (preferences are part of the library).
         cc.egui_ctx.set_theme(workflow::theme_from(app.library.preferences().theme));
         app
@@ -111,6 +119,7 @@ impl LectioApp {
             material: MaterialState::default(),
             sample_blobs: HashMap::new(),
             ui_state: ui_state::UiState::default(),
+            speech: speech_actions::SpeechState::default(),
             #[cfg(not(target_arch = "wasm32"))]
             screenshot: None,
         }
@@ -220,6 +229,36 @@ impl LectioApp {
             fullscreen: self.ui_state.fullscreen,
             quiet_for_s: self.ui_state.quiet_for_s,
             prefs: self.library.preferences(),
+            speech: self.speech_view(),
+            source: self.ui_state.source,
+            sources: CaptureSource::ALL.map(|s| match &self.platform {
+                Some(platform) if self.can_save => platform.source_support(s),
+                _ => Err("Recording is turned off in this window."),
+            }),
+            screenshots: self.platform.as_ref().is_some_and(|p| p.supports_screenshot()),
+            screenshot: self.ui_state.screenshot.as_ref().map(|s| s.texture.as_ref()),
+            cleaning: self.ui_state.cleaning.is_some(),
+            has_cleaned: self
+                .selected
+                .and_then(|id| self.library.session(id))
+                .and_then(|s| s.recording.as_ref())
+                .is_some_and(|r| r.cleaned_file.is_some()),
+        }
+    }
+
+    fn speech_view(&self) -> ui::SpeechView<'_> {
+        let service = self.speech.service.as_deref();
+        let model = self.library.preferences().speech_model;
+        ui::SpeechView {
+            available: service.is_some(),
+            downloaded: service.is_some_and(|s| s.is_downloaded(model)),
+            unavailable: lectio_core::prefs::SpeechModel::ALL.map(|m| service.and_then(|s| s.unavailable(m))),
+            download: self.speech.download,
+            job: self.speech.job.as_ref().map(|j| (j.session, j.done_ms, j.total_ms)),
+            caption: &self.speech.caption,
+            captions_supported: service.is_some_and(|s| s.supports_captions()),
+            hits: &self.speech.hits,
+            query: &self.speech.query,
         }
     }
 
@@ -256,8 +295,11 @@ impl LectioApp {
             return Playback { problem: Some("Sample data: there is no audio to play.".into()), ..empty };
         }
         let Some(platform) = &self.platform else { return empty };
-        match platform.open_playback(&recording.file_name) {
-            Ok(player) => Playback { player: Some(player), ..empty },
+        match platform.open_playback(&self.playback_file(recording)) {
+            Ok(player) => {
+                self.configure_player(player.as_ref());
+                Playback { player: Some(player), ..empty }
+            }
             Err(e) => Playback { problem: Some(e.to_string()), ..empty },
         }
     }
@@ -440,7 +482,7 @@ impl LectioApp {
             return;
         };
         let Some(capture) = &mut self.capture else { return };
-        match platform.start_capture(&recording_file_name(capture.session)) {
+        match platform.start_capture(&recording_file_name(capture.session), self.ui_state.source) {
             Ok(recorder) => {
                 capture.recorder = Some(recorder);
                 capture.clock = next_clock;
@@ -466,6 +508,7 @@ impl LectioApp {
             file_name: recording_file_name(capture.session),
             duration_ms,
             sample_rate: STORE_SAMPLE_RATE,
+            cleaned_file: None,
         };
         match self.library.with_recording(capture.session, recording) {
             Ok(library) => self.library = library,
@@ -539,8 +582,12 @@ impl LectioApp {
             }
         }
         self.collect_background_errors();
-        let material_busy = self.tick_material(ctx);
-        self.tick_ui_state(ctx.input(|i| i.time));
+        let now = ctx.input(|i| i.time);
+        let material_busy = self.tick_material(ctx)
+            | self.tick_speech(now)
+            | self.tick_cleaning()
+            | self.tick_screenshot(ctx);
+        self.tick_ui_state(now);
         let loading = self.playback.as_ref().and_then(|p| p.player.as_ref()).is_some_and(|p| !p.is_ready());
         if self.is_recording_active() || self.view().playing || loading || material_busy {
             ctx.request_repaint_after(LIVE_REDRAW);

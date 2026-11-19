@@ -9,13 +9,15 @@ use serde::{Deserialize, Serialize};
 use crate::labels::validated_name;
 use crate::material::{Attachment, SlideDeck, SlideLink};
 use crate::prefs::Preferences;
+use crate::transcript::Transcript;
 use crate::{CourseId, LabelKind, LabelSet, ModelError, NoteId, SessionId};
 
 /// Version of the `library.json` format. Bump it when the format changes.
 /// 1 = Phase 1. 2 = Phase 2 (slide decks, slide links, photo/sketch notes).
 /// 3 = session workflow (Heading label, slide items, trash, preferences).
+/// 4 = Phase 3 (transcripts, slide text, cleaned audio copy, audio settings).
 /// Older files still load because every new field has a default.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// What a feed item is. Older files have no `kind`: they are text notes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -67,6 +69,9 @@ pub struct Recording {
     pub file_name: String,
     pub duration_ms: u64,
     pub sample_rate: u32,
+    /// A copy with the audio filters applied ("Save cleaned copy"), if made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cleaned_file: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,6 +88,9 @@ pub struct Session {
     /// Set when the session is moved to the trash (restorable for 30 days).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deleted_unix_ms: Option<u64>,
+    /// Speech-to-text of the recording (Phase 3), aligned to its timeline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcript: Option<Transcript>,
 }
 
 impl Session {
@@ -186,6 +194,7 @@ impl Library {
             notes: Vec::new(),
             decks: Vec::new(),
             deleted_unix_ms: None,
+            transcript: None,
         };
         let id = session.id;
         let next = self.map_course(course, |c| {

@@ -172,7 +172,7 @@ fn video_constraints() -> JsValue {
 /// A canvas that is never added to the page, used only to read pixels.
 /// `willReadFrequently` tells the browser to keep it in CPU memory, which
 /// makes repeated `getImageData` calls fast.
-fn offscreen_canvas() -> Result<(HtmlCanvasElement, CanvasRenderingContext2d), String> {
+pub(super) fn offscreen_canvas() -> Result<(HtmlCanvasElement, CanvasRenderingContext2d), String> {
     let document = web_sys::window().and_then(|w| w.document()).ok_or("no document")?;
     let canvas: HtmlCanvasElement =
         document.create_element("canvas").map_err(js_err)?.dyn_into().map_err(|_| "no <canvas> element")?;

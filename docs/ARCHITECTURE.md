@@ -58,7 +58,7 @@ lectio/
 ├── index.html, Trunk.toml     # web build (trunk build --release → dist/)
 ├── web/lectio-capture-worklet.js  # browser audio-thread code for recording
 ├── .github/workflows/ci.yml   # CI: ubuntu/windows/macos + web (+ advisory browser flow)
-├── tools/web-smoke.mjs        # headless-Chrome test driver; `--flow phase2` (PROBLEMS P-010, P-017)
+├── tools/web-smoke.mjs        # headless-Chrome test driver; `--flow phase2` (CI) and `--flow phase3` (local, downloads a model)
 ├── assets/sample-slides.pdf   # 2-page deck for sample data, tests and the browser flow
 ├── assets/fonts/              # Inter, JetBrains Mono (OFL), Phosphor icons (MIT); sources in README.md
 ├── crates/lectio-core/        # pure domain logic: no UI, no audio I/O, no platform code
@@ -76,30 +76,48 @@ lectio/
 │   │   │                      #   with_slide_item / with_note_text (slides posted to the feed)
 │   │   ├── stream.rs          # audio stream: 10 s sections, section_at, section_labels (tint per section)
 │   │   ├── trash.rs           # live/trashed sessions, trash + restore, 30-day expiry
-│   │   ├── prefs.rs           # Preferences: shown panels + theme (saved in the library)
+│   │   ├── prefs.rs           # Preferences: panels, theme, speed, filters, captions, speech model + language
 │   │   ├── export.rs          # session_markdown: headings, notes, slides, labels → Markdown
+│   │   ├── transcript.rs      # Phase 3: Segment/Transcript, window alignment, next window, merge, segment_at
+│   │   ├── search.rs          # Phase 3: fold, word/prefix matching, ranking, snippets, search_deck, with_slide_text
+│   │   ├── dsp.rs             # Phase 3: analyse, biquads, expander, normalise gain, FilterChain, with_cleaned_copy
+│   │   ├── stretch.rs         # Phase 3: speed steps, skip, time left, TimeStretcher (WSOLA)
 │   │   └── storage.rs         # LibraryStore, interpret_saved, JsonFileStore, FileBlobStore (atomic writes)
-│   └── tests/                 # 103 tests: model, material, workflow, seek, clock, storage, resample, capture pipeline
+│   └── tests/                 # 143 tests: model, material, workflow, transcript, search, audio DSP, seek, clock,
+│                              #   storage, resample, capture pipeline
+├── crates/lectio-speech/      # Phase 3 (ADR-016): Whisper on candle, no platform code
+│   └── src/                   # mel.rs (spectrogram), tokenizer.rs (tokens → text, languages), models.rs (files,
+│                              #   pinned revisions, SHA-256), engine.rs (one 30 s window), job.rs (window stepper,
+│                              #   captions), protocol.rs (page ↔ worker messages); 13 tests
+├── crates/lectio-worker/      # Phase 3: the browser's speech Web Worker (wasm only; empty on desktop)
 ├── src/
 │   ├── main.rs                # module list + two `main`s, picked by target
-│   ├── entry_native.rs        # native: args (--screenshot, --self-test-audio), window options
+│   ├── entry_native.rs        # native: args (--screenshot, --self-test-audio, --transcribe), window options
 │   ├── entry_web.rs           # web: open IndexedDB, start egui on the canvas, #sample
 │   ├── app.rs                 # LectioApp: owns state, applies Actions, saves through `dyn Platform`
 │   ├── app/material_actions.rs # Phase 2 actions: imports, camera, sketch, viewer, reading view
 │   ├── app/ui_state.rs        # undo for deletes (8 s), level-meter history, silence timer
 │   ├── app/workflow.rs        # screens, trash, posting slides, saved layout/theme, Copy all / Export Markdown
+│   ├── app/speech_actions.rs  # Phase 3: transcription, model download, live captions, search, opening a result
+│   ├── app/audio_actions.rs   # Phase 3: speed, filters, cleaned copy, recording source, screenshots
 │   ├── action.rs              # Action enum: everything the UI can ask for
 │   ├── material.rs            # Phase 2 runtime state: pending imports, Viewer, image/slide texture caches, camera
-│   ├── media/                 # slides.rs (hayro, DeckRenderer), images.rs (EXIF-upright decode, JPEG), sketch.rs (PNG)
+│   ├── media/                 # slides.rs (hayro, DeckRenderer: pages + text), slide_text.rs (text device),
+│   │                          #   images.rs (EXIF-upright decode, JPEG), sketch.rs (PNG)
 │   ├── platform/
-│   │   ├── mod.rs             # traits Platform / AudioCapture / AudioPlayback / CameraSession, Pending, FileKind
+│   │   ├── mod.rs             # traits Platform / AudioCapture / AudioPlayback / CameraSession, Pending, FileKind,
+│   │   │                      #   CaptureSource
+│   │   ├── speech.rs          # SpeechService trait, SpeechRequest / SpeechEvent
 │   │   ├── wav.rs             # WAV bytes ↔ samples (shared; 2 unit tests)
-│   │   ├── native/            # mod.rs (NativePlatform: data folder, rfd, FileBlobStore), recorder.rs, player.rs
-│   │   └── web/               # mod.rs (WebPlatform), idb.rs, store.rs, recorder.rs, player.rs, files.rs, camera.rs
+│   │   ├── native/            # mod.rs (NativePlatform: data folder, rfd, FileBlobStore, xcap), recorder.rs (mic +
+│   │   │                      #   loopback, mixing), player.rs (stretcher + filters), speech.rs (thread, download, CLI)
+│   │   └── web/               # mod.rs (WebPlatform), idb.rs, store.rs, recorder.rs, player.rs (<audio>), files.rs,
+│   │                          #   camera.rs, display.rs (getDisplayMedia), speech.rs (model download, worker)
 │   ├── ui/                    # views (see "Screens and workspace"): theme (tokens), widgets, icons, format,
-│   │                          #   nav (left column), home (Home/Collections/Trash/placeholders), workspace (panels,
-│   │                          #   Layout menu, tabs), slides, notes (feed), stream (audio sections), capture + playback
-│   │                          #   + composer (input bar), timeline, reading, sketch, camera, labels (rename window)
+│   │                          #   nav (left column), home (Home/Collections/Trash/Tasks), search (Search page),
+│   │                          #   workspace (panels, Layout menu, tabs, caption strip), slides, notes (feed),
+│   │                          #   stream (Audio | Transcript tabs), transcript, capture + playback + composer (input
+│   │                          #   bar), timeline, reading, sketch, camera, screen_crop, labels (rename window)
 │   ├── demo.rs                # sample data with slides + a sketch (--screenshot, web #sample)
 │   ├── self_test.rs           # native only: headless mic test
 │   └── screenshot.rs          # native only: draws 120 frames, saves a PNG, exits
@@ -107,7 +125,7 @@ lectio/
 └── shots/                     # screenshots
 ```
 
-## Data model (implemented; schema version 3)
+## Data model (implemented; schema version 4)
 ```mermaid
 erDiagram
   LIBRARY ||--o{ COURSE : contains
@@ -122,21 +140,41 @@ erDiagram
   SLIDE_LINK }o--|| SLIDE_DECK : "page of"
   NOTE ||--o| ATTACHMENT : "photo or sketch (Phase 2)"
   SLIDE_DECK ||--|| BLOB : "PDF bytes, stored separately"
+  SESSION ||--o| TRANSCRIPT : "has (v4)"
+  TRANSCRIPT ||--o{ SEGMENT : "sorted, inside the recording"
   ATTACHMENT ||--|| BLOB : "PNG/JPEG bytes, stored separately"
   LIBRARY {
-    u32 schema_version "3 (1 and 2 still load)"
+    u32 schema_version "4 (1, 2 and 3 still load)"
+  }
+  TRANSCRIPT {
+    string language "Whisper code, e.g. en"
+    string model "tiny|base|small"
+    bool complete "false while running or stopped"
+  }
+  SEGMENT {
+    u64 start_ms
+    u64 end_ms
+    string text
   }
   PREFERENCES {
     bool show_slides "default true"
     bool show_feed "default true"
     bool show_audio "default true"
     enum theme "system|light|dark"
+    u16 speed_percent "50-200, v4"
+    FilterSettings filters "noise_reduction, voice_boost, normalise (v4)"
+    bool play_cleaned "v4"
+    bool captions "v4"
+    enum speech_model "tiny|base|small (v4)"
+    string language "none = detect (v4)"
+    bool show_transcript_tab "v4"
   }
   SLIDE_DECK {
     uuid id
     string title "from the file name"
     BlobKey blob "uuid.pdf"
     u32 page_count "read at import"
+    string[] page_text "one per page, for search (v4)"
   }
   SLIDE_LINK {
     uuid deck
@@ -165,6 +203,7 @@ erDiagram
     string file_name "recordings/<session-id>.wav"
     u64 duration_ms
     u32 sample_rate "16000"
+    string cleaned_file "session-clean.wav, if made (v4)"
   }
   NOTE {
     uuid id
@@ -186,7 +225,10 @@ must point at an existing page of a deck *in the same session*; removing a deck 
 imported files are recognised by their first bytes, with 100 MB (PDF) and 25 MB (image) limits; a file with a newer
 `schema_version` is refused. Since v3 (tested in `tests/workflow_tests.rs`): a slide item must link to an existing page and
 its title falls back to "Slide N" when cleared; a trashed session is hidden from every list except Trash and is removed for
-good 30 days after `deleted_unix_ms`; every new field has a default, so v2 files load unchanged.
+good 30 days after `deleted_unix_ms`; every new field has a default, so v2 files load unchanged. Since v4 (tested in
+`tests/transcript_tests.rs` and `tests/search_tests.rs`): a transcript needs a recording and its segments must be in order
+and inside the recording; `page_text` has exactly one entry per page; a cleaned copy's name is letters, digits, `-`, `_`
+and `.wav` only; v3 files load with no transcripts, normal speed and no filters.
 
 Where the data lives (same JSON format and same WAV format on every platform):
 ```
@@ -195,11 +237,14 @@ Native: the OS app-data folder (macOS ~/Library/Application Support/org.Lectio.L
   library.json                  # the whole Library, pretty-printed JSON (small: no file bytes)
   recordings/<session-id>.wav   # 16 kHz, mono, 16-bit PCM
   blobs/<uuid>.pdf|png|jpg      # Phase 2: slide decks, photos (as picked), sketches (PNG)
+  recordings/<id>-clean.wav     # Phase 3: a cleaned copy, if the user made one
+  models/whisper-<size>/        # Phase 3: config.json, tokenizer.json, model.safetensors (checked by SHA-256)
 
-Web: IndexedDB database "lectio" (version 2) in the browser, per site
+Web: IndexedDB database "lectio" (version 3) in the browser, per site
   table "library":    key "library.json"      → the same JSON text
   table "recordings": key "<session-id>.wav"  → the same WAV bytes
   table "blobs":      key "<uuid>.pdf|png|jpg" → the file's bytes (added by the v1→v2 upgrade; v1 data is kept)
+  table "models":     key "whisper-<size>/<file>" → a speech-model file (added by the v2→v3 upgrade)
 ```
 
 ## Phase 2 flows
@@ -364,8 +409,8 @@ anything (memory allocator, a lock, the disk), the deadline can be missed and au
   Tab navigation and browser zoom were not tested there.
 - Keyboard: Tab moves focus; Cmd/Ctrl+R start/pause/resume recording or play/pause; Cmd/Ctrl+Shift+R stop; Cmd/Ctrl+1–4 label the
   moment (Important, Review, Task, Definition) and Cmd/Ctrl+5 saves the typed text as a Heading; Cmd/Ctrl+Shift+N posts the
-  next slide; Esc leaves full-screen slides; Cmd/Ctrl+[ and ] seek ±5 s; with the timeline focused, ←/→ seek ±5 s and
-  Home/End jump to the ends.
+  next slide; Esc leaves full-screen slides; Cmd/Ctrl+[ and ] skip ±10 s; Cmd/Ctrl+Shift+, and . change the playback
+  speed; with the timeline focused, ←/→ skip ±10 s and Home/End jump to the ends.
 - Navigation items report themselves as tabs with a selected state; audio sections are buttons named "Play from 0:10".
 - Zoom: Cmd/Ctrl + and − (eframe built-in); panels scroll and wrap, so 200% stays usable.
 - Label chips use near-black text on light fills (contrast above 7:1), always show the label name, and labelled timeline markers have
@@ -471,3 +516,75 @@ flowchart LR
   C -- "Restore" --> D["with_session_restored: back on Home"]
   C -- "no, at the next start" --> E["without_expired_trash: session removed;<br/>its blobs and recording deleted"]
 ```
+
+## Phase 3: text and audio
+
+### Transcribe a recording (ADR-016)
+```mermaid
+sequenceDiagram
+  actor U as User
+  participant App as LectioApp (speech_actions.rs)
+  participant S as SpeechService
+  participant W as Desktop thread / browser Web Worker
+  participant E as lectio_speech (Engine, Transcription)
+  participant L as Library (immutable)
+  U->>App: Transcript tab › Transcribe (model, language)
+  App->>L: with_transcript(empty, complete=false)
+  App->>S: Transcribe{session, file, model, language, start_ms}
+  S->>S: model files present? else download (progress, SHA-256 check)
+  S->>W: load the model (once), send the 16 kHz samples
+  loop each 30 s window
+    W->>E: Transcription::next → mel → encoder → greedy decoding with timestamps
+    E-->>W: segments aligned to the recording (lectio_core::transcript)
+    W-->>App: Segments + Progress events (polled each frame)
+    App->>L: with_transcript(merged segments) and save
+  end
+  W-->>App: Finished{complete}
+```
+- **Stop** sets a flag the loop checks between windows; what is done stays, and "Continue transcribing" starts after the
+  last finished segment.
+- **Live captions:** every 2 s while recording, `AudioCapture::recent_audio(8 s)` → `Caption` request → the same engine →
+  the caption strip above the input bar. Desktop recorders keep the last 30 s for this.
+- **Desktop CLI:** `lectio --transcribe file.wav --model tiny|base|small [--language xx]` prints segments and the real-time
+  factor (the numbers in ADR-016).
+
+### Playback: speed and filters (ADR-017)
+```mermaid
+flowchart LR
+  subgraph Desktop["Desktop (cpal output callback, no allocation)"]
+    A1["16-bit samples in memory"] --> B1["TimeStretcher (WSOLA, 50-200%)"] --> C1["FilterChain"] --> D1["linear resample to the speaker rate"]
+  end
+  subgraph Browser["Browser"]
+    A2["WAV from IndexedDB"] --> C2["FilterChain, a slice per frame (if filters are on)"] --> D2["audio element: playbackRate + preservesPitch"]
+  end
+```
+"Save cleaned copy" runs the same `FilterChain` over the whole recording and stores `<session>-clean.wav`; playback then
+uses it, with the live filters off.
+
+### Recording sources and screenshots (ADR-019)
+```mermaid
+flowchart LR
+  M["Microphone (cpal input / getUserMedia)"] --> R1["ring"] --> X["writer: each to 16 kHz, mix, WAV + last 30 s"]
+  C["Computer audio: macOS process tap / WASAPI loopback / Pulse-PipeWire monitor / getDisplayMedia"] --> R2["ring"] --> X
+  SC["Screenshot: xcap main display / getDisplayMedia frame"] --> CR["drag to choose the part"] --> PN["photo note at the moment pressed"]
+```
+
+### Search (ADR-018)
+The Search page calls `lectio_core::search::search(library, query, 60)` when the text changes and when the page opens. Each
+hit carries the session, the moment and the slide; opening it selects the session, seeks, and shows the slide. Slide text is
+read once per deck (`media/slide_text.rs`) into `SlideDeck.page_text`; the slides panel's box lists matching pages
+(`search_deck`).
+
+### Phase 3 accessibility
+New controls have accessible names: "Speech model", "Spoken language", "Transcription progress", "Play from 0:12" (each
+segment), "Search everything", "Search slides", "Audio source", "Live captions", "Sound filters", "Playback speed",
+"Screenshot area". The caption strip uses large text (18 px).
+
+### Phase 3 known limitations
+- No speaker separation (ADR-020). Live captions need the model downloaded first and lag about 2 s behind.
+- The tiny model mishears technical words; base and small are better but slower (numbers in ADR-016).
+- Small is desktop-only (browser tab memory). The browser build has no WebAssembly SIMD yet, so it is slower there.
+- Computer audio: macOS 14.2+ and permission; Firefox and Safari can't share tab sound; if the default output device also
+  has a microphone, macOS records that microphone instead.
+- Slide text: decks from before Phase 3 are read the first time their session opens; scanned (image-only) PDFs have none.
+- Search scans everything each time: fine for a few terms of lectures, would need an index for much more.

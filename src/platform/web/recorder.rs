@@ -18,17 +18,19 @@ use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{AudioContext, AudioWorkletNode, IdbDatabase, MediaStream, MediaStreamConstraints, MessageEvent};
 
-use super::{ErrorSink, idb, js_err, report};
+use super::{ErrorSink, display, idb, js_err, report};
 use crate::platform::wav::encode_mono_i16;
-use crate::platform::{AudioCapture, AudioError, RecorderStats, STORE_SAMPLE_RATE};
+use crate::platform::{AudioCapture, AudioError, CaptureSource, RecorderStats, STORE_SAMPLE_RATE};
 
 const WORKLET_URL: &str = "./lectio-capture-worklet.js";
 const PROCESSOR_NAME: &str = "lectio-capture";
+/// Live captions read at most this much recent audio (16 kHz samples).
+const RECENT_MAX: usize = 30 * STORE_SAMPLE_RATE as usize;
 
-/// The live audio graph: microphone → worklet. Kept so it can be torn down.
+/// The live audio graph: inputs → worklet. Kept so it can be torn down.
 struct Graph {
     ctx: AudioContext,
-    stream: MediaStream,
+    streams: Vec<MediaStream>,
     node: AudioWorkletNode,
     _on_message: Closure<dyn FnMut(MessageEvent)>,
 }
@@ -39,11 +41,8 @@ impl Graph {
             port.set_onmessage(None);
         }
         let _ = self.node.disconnect();
-        for track in self.stream.get_tracks().iter() {
-            if let Ok(track) = track.dyn_into::<web_sys::MediaStreamTrack>() {
-                track.stop(); // turns the browser's "recording" indicator off
-            }
-        }
+        // Stopping the tracks turns the browser's recording/sharing indicator off.
+        self.streams.iter().for_each(display::stop);
         let _ = self.ctx.close();
     }
 }
@@ -97,11 +96,11 @@ pub struct WebRecorder {
 impl WebRecorder {
     /// Returns at once; the microphone connects when the user allows it.
     /// Until then the clock stays at 0:00.
-    pub fn start(db: IdbDatabase, file_name: &str, errors: ErrorSink) -> Self {
+    pub fn start(db: IdbDatabase, file_name: &str, source: CaptureSource, errors: ErrorSink) -> Self {
         let shared = Rc::new(Shared::default());
         let connecting = Rc::clone(&shared);
         wasm_bindgen_futures::spawn_local(async move {
-            match connect(Rc::clone(&connecting)).await {
+            match connect(Rc::clone(&connecting), source).await {
                 Ok(graph) if connecting.stopped.get() => graph.tear_down(),
                 Ok(graph) => *connecting.graph.borrow_mut() = Some(graph),
                 Err(e) => *connecting.error.borrow_mut() = Some(e),
@@ -111,7 +110,7 @@ impl WebRecorder {
     }
 }
 
-async fn connect(shared: Rc<Shared>) -> Result<Graph, String> {
+async fn microphone() -> Result<MediaStream, String> {
     let window = web_sys::window().ok_or("no browser window")?;
     let media = window
         .navigator()
@@ -120,20 +119,40 @@ async fn connect(shared: Rc<Shared>) -> Result<Graph, String> {
     let constraints = MediaStreamConstraints::new();
     constraints.set_audio(&raw_audio_constraints());
     let request = media.get_user_media_with_constraints(&constraints).map_err(js_err)?;
-    let stream: MediaStream = JsFuture::from(request)
+    JsFuture::from(request)
         .await
         .map_err(|e| format!("Microphone access failed: {}", js_err(e)))?
         .dyn_into()
-        .map_err(|_| "the browser did not return a media stream".to_string())?;
+        .map_err(|_| "the browser did not return a media stream".to_string())
+}
+
+/// Microphone and/or a shared tab's sound; with both, Web Audio adds the
+/// two inputs of the worklet together (ADR-019).
+async fn connect(shared: Rc<Shared>, source: CaptureSource) -> Result<Graph, String> {
+    let mut streams = Vec::new();
+    if source != CaptureSource::Computer {
+        streams.push(microphone().await?);
+    }
+    if source != CaptureSource::Microphone {
+        match display::share(true).await {
+            Ok(stream) => streams.push(stream),
+            Err(e) => {
+                streams.iter().for_each(display::stop);
+                return Err(e);
+            }
+        }
+    }
 
     let ctx = AudioContext::new().map_err(js_err)?;
     let worklet = ctx.audio_worklet().map_err(js_err)?;
     JsFuture::from(worklet.add_module(WORKLET_URL).map_err(js_err)?)
         .await
         .map_err(|e| format!("Could not load the recording worklet: {}", js_err(e)))?;
-    let source = ctx.create_media_stream_source(&stream).map_err(js_err)?;
     let node = AudioWorkletNode::new(&ctx, PROCESSOR_NAME).map_err(js_err)?;
-    source.connect_with_audio_node(&node).map_err(js_err)?;
+    for stream in &streams {
+        let input = ctx.create_media_stream_source(stream).map_err(js_err)?;
+        input.connect_with_audio_node(&node).map_err(js_err)?;
+    }
     // The worklet outputs silence; connecting it keeps the browser running it.
     node.connect_with_audio_node(&ctx.destination()).map_err(js_err)?;
 
@@ -146,7 +165,7 @@ async fn connect(shared: Rc<Shared>) -> Result<Graph, String> {
     if let Ok(resume) = ctx.resume() {
         let _ = JsFuture::from(resume).await;
     }
-    Ok(Graph { ctx, stream, node, _on_message: on_message })
+    Ok(Graph { ctx, streams, node, _on_message: on_message })
 }
 
 /// Lecture audio as the microphone hears it: the browser's echo
@@ -191,6 +210,12 @@ impl AudioCapture for WebRecorder {
             peak: s.peak.get(),
             ..RecorderStats::default()
         }
+    }
+
+    fn recent_audio(&self, ms: u64) -> Vec<f32> {
+        let wanted = ((ms * u64::from(STORE_SAMPLE_RATE) / 1_000) as usize).min(RECENT_MAX);
+        let samples = self.shared.samples.borrow();
+        samples[samples.len().saturating_sub(wanted)..].iter().map(|&s| f32::from(s) / f32::from(i16::MAX)).collect()
     }
 
     fn take_error(&self) -> Option<String> {

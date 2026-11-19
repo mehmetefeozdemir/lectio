@@ -5,6 +5,7 @@
 //! See `docs/DECISIONS.md` ADR-003 and ADR-006.
 
 pub mod clock;
+pub mod dsp;
 mod error;
 mod ids;
 mod labels;
@@ -14,10 +15,13 @@ mod model;
 pub mod prefs;
 pub mod realtime;
 pub mod resample;
+pub mod search;
 pub mod storage;
+pub mod stretch;
 pub mod stream;
 pub mod timeline;
 pub mod trash;
+pub mod transcript;
 
 pub use error::ModelError;
 pub use ids::{CourseId, DeckId, NoteId, SessionId};

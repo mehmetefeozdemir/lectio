@@ -9,6 +9,8 @@
   <!-- trunk: build the `lectio` binary to WebAssembly, and copy the recording worklet next to it. -->
   <link data-trunk rel="rust" data-bin="lectio" />
   <link data-trunk rel="copy-file" href="web/lectio-capture-worklet.js" />
+  <!-- trunk: the speech worker (ADR-016), a second WebAssembly program run as a Web Worker. -->
+  <link data-trunk rel="rust" href="crates/lectio-worker/Cargo.toml" data-bin="lectio-worker" data-type="worker" data-loader-shim />
 
   <style>
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #f7f7f7; }

@@ -1,6 +1,7 @@
 //! The list screens: Home (every session, newest first), Collections (the
-//! courses), Trash (restorable for 30 days), and the Tasks and Search
-//! placeholders. Opening a session goes to the workspace.
+//! courses), Trash (restorable for 30 days), and the Tasks placeholder.
+//! Search has its own file (`search.rs`). Opening a session goes to the
+//! workspace.
 
 use eframe::egui::{self, CornerRadius, Key, RichText, Role, Sense, Stroke};
 use lectio_core::trash::TRASH_DAYS;
@@ -24,15 +25,12 @@ pub fn show(ui: &mut egui::Ui, view: &View, buffers: &mut Buffers, actions: &mut
             let message = "Notes labelled Task will be collected here, across all sessions (Phase 4).";
             widgets::empty_state(ui, icons::TASKS, "Tasks are coming soon", message, None);
         }
-        Screen::Search => {
-            let message = "Searching every note and slide arrives in Phase 3.";
-            widgets::empty_state(ui, icons::SEARCH, "Search is coming soon", message, None);
-        }
+        Screen::Search => super::search::page(ui, view, buffers, actions),
         Screen::Home | Screen::Workspace => home(ui, view, buffers, actions),
     }
 }
 
-fn page_title(ui: &mut egui::Ui, title: &str, detail: &str, right: impl FnOnce(&mut egui::Ui)) {
+pub(super) fn page_title(ui: &mut egui::Ui, title: &str, detail: &str, right: impl FnOnce(&mut egui::Ui)) {
     let p = palette(ui);
     ui.horizontal(|ui| {
         ui.vertical(|ui| {

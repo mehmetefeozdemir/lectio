@@ -22,16 +22,22 @@ mod slides;
 mod stream;
 pub mod theme;
 mod timeline;
+mod transcript;
+mod screen_crop;
+mod search;
 pub mod widgets;
 mod workspace;
 
 use eframe::egui::{self, Align2, CornerRadius, Id, Key, KeyboardShortcut, Margin, Modifiers, RichText, ThemePreference};
 use lectio_core::clock::{NoteDraft, RecorderCommand, RecorderPhase};
-use lectio_core::prefs::Preferences;
+use lectio_core::prefs::{Preferences, SpeechModel};
+use lectio_core::search::Hit;
+use lectio_core::stretch::{SKIP_MS, faster, slower};
 use lectio_core::{LabelKind, LabelSet, Library, NoteId, SessionId};
 
 use crate::action::{Action, Panel, Screen};
 use crate::material::MaterialState;
+use crate::platform::CaptureSource;
 pub use sketch::SketchPad;
 use theme::{palette, radius, size, space};
 
@@ -40,7 +46,9 @@ pub const LABEL_KEYS: [Key; 5] = [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Ke
 /// "Post next slide".
 pub const POST_SLIDE: (Modifiers, Key) = (Modifiers::COMMAND.plus(Modifiers::SHIFT), Key::N);
 /// Seek step for keyboard shortcuts and timeline arrow keys.
-pub const SEEK_STEP_MS: i64 = 5_000;
+pub const SEEK_STEP_MS: i64 = SKIP_MS as i64;
+/// Slower / faster playback (modifiers, slower key, faster key).
+pub const SPEED_KEYS: (Modifiers, Key, Key) = (Modifiers::COMMAND.plus(Modifiers::SHIFT), Key::Comma, Key::Period);
 /// Below this width (px) the navigation shows icons only and the workspace
 /// shows one panel at a time, as tabs.
 pub const NARROW: f32 = 900.0;
@@ -82,6 +90,34 @@ pub struct View<'a> {
     pub quiet_for_s: f64,
     /// Saved layout and theme (part of the library, ADR-015).
     pub prefs: &'a Preferences,
+    /// Phase 3: speech-to-text, captions and search (ADR-016, ADR-018).
+    pub speech: SpeechView<'a>,
+    /// What the next recording listens to, and which sources work here.
+    pub source: CaptureSource,
+    pub sources: [Result<(), &'static str>; 3],
+    pub screenshots: bool,
+    /// The screen picture waiting to be cropped (`Some(None)` while it loads).
+    pub screenshot: Option<Option<&'a egui::TextureHandle>>,
+    pub cleaning: bool,
+    /// The open session has a cleaned copy.
+    pub has_cleaned: bool,
+}
+
+/// What the transcript, captions and search views need.
+pub struct SpeechView<'a> {
+    /// False in sample data / read-only windows.
+    pub available: bool,
+    /// The chosen model is already on this device.
+    pub downloaded: bool,
+    /// Why each model (tiny, base, small) can't be used here, if it can't.
+    pub unavailable: [Option<&'static str>; 3],
+    pub download: Option<(SpeechModel, u64, u64)>,
+    /// (session, done ms, total ms) of the running transcription.
+    pub job: Option<(SessionId, u64, u64)>,
+    pub caption: &'a str,
+    pub captions_supported: bool,
+    pub hits: &'a [Hit],
+    pub query: &'a str,
 }
 
 /// What the user is in the middle of editing that isn't part of the model.
@@ -97,6 +133,11 @@ pub struct Buffers {
     pub note_edit: Option<(NoteId, String)>,
     /// "New session" was pressed and the course is being chosen.
     pub picking_course: bool,
+    /// The Search page's text, and the slide panel's page search.
+    pub search: String,
+    pub slide_search: String,
+    /// Screenshot crop: drag start and end (fractions of the picture).
+    pub crop: Option<(egui::Pos2, egui::Pos2)>,
 }
 
 impl Buffers {
@@ -155,6 +196,7 @@ pub fn draw(ui: &mut egui::Ui, view: &View, buffers: &mut Buffers, banner: Optio
     labels::editor_window(ui.ctx(), buffers, actions);
     sketch::window(ui.ctx(), buffers, actions);
     camera::window(ui.ctx(), view, actions);
+    screen_crop::window(ui.ctx(), view, buffers, actions);
     undo_toast(ui.ctx(), view, actions);
 }
 
@@ -264,6 +306,13 @@ pub fn shortcuts(ctx: &egui::Context, view: &View) -> Vec<Action> {
         }
         if pressed(Modifiers::COMMAND, Key::CloseBracket) {
             actions.push(Action::SeekBy(SEEK_STEP_MS));
+        }
+        // Speed: Cmd/Ctrl+Shift+, slower, Cmd/Ctrl+Shift+. faster.
+        if pressed(SPEED_KEYS.0, SPEED_KEYS.1) {
+            actions.push(Action::SetSpeed(slower(view.prefs.speed_percent)));
+        }
+        if pressed(SPEED_KEYS.0, SPEED_KEYS.2) {
+            actions.push(Action::SetSpeed(faster(view.prefs.speed_percent)));
         }
     }
     // Page Up / Page Down turn slides, unless the user is typing.

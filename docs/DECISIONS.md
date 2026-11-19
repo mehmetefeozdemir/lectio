@@ -355,3 +355,131 @@
 - **Consequences:** the course sidebar is gone (Collections replaces it). An older Lectio can't open a v3 library, as with
   every schema bump. Computer-audio capture is shown in the source picker but disabled until Phase 3. Printing is not done yet;
   Markdown is the export format for now.
+
+## ADR-016: Speech-to-text: Whisper on candle (pure Rust), on a thread on desktop and in a Web Worker in the browser
+- **Date:** 2026-11-19
+- **Status:** accepted
+- **Context:** Phase 3 adds transcripts after class and live captions while recording. The spec asks for local, offline
+  speech-to-text by default, on all four targets (Windows, macOS, Linux, web). An hour of lecture must not take hours.
+- **Options considered:**
+  - **whisper.cpp through `whisper-rs`.** Fast and widely used, but it compiles C++ with CMake and generates bindings with
+    bindgen (libclang). This Mac has no CMake, every CI runner would need a C++ toolchain, and it doesn't build for the
+    browser, so the web would need a second engine.
+  - **ONNX Runtime (`ort`).** Good speed, but ships large native libraries per platform; the browser needs the separate
+    JavaScript `onnxruntime-web`, so again two code paths.
+  - **The browser's Web Speech API.** No download, but in Chrome it sends the audio to a cloud service (not local), it only
+    works on a live microphone (not a saved recording), and it gives no timestamps per phrase.
+  - **Transcribe on the desktop only.** Simplest, but the web version would lose a core Phase 3 feature.
+  - **OpenAI's Whisper model run with `candle`, a machine-learning library written in Rust (chosen).** Pure Rust, so the same
+    code builds for the desktop and for WebAssembly with no C/C++ toolchain. candle includes the Whisper network; I wrote the
+    rest in a new crate, `crates/lectio-speech`.
+- **Decision:**
+  - **Engine (`lectio-speech`):** my own log-mel spectrogram (`mel.rs`; candle's version starts threads, which a browser
+    build can't, P-027), a decoder that turns tokens back into text from `tokenizer.json` without a tokenizer library
+    (`tokenizer.rs`), greedy decoding with Whisper's timestamp rules (`engine.rs`), and a window-by-window stepper
+    (`job.rs`). The alignment rules (window offset, clamping, dropping "[Music]", where the next window starts, merging)
+    are pure functions in `lectio_core::transcript`, unit-tested without a model.
+  - **Models:** tiny (146 MB), base (279 MB), small (925 MB), chosen in the Transcript tab. Files come from a *pinned
+    revision* of the public model repositories, so they can't change, and each file's size and SHA-256 checksum are stored
+    in `models.rs` and checked after every download (desktop: also before every load). Downloads report progress.
+    Desktop: `<data>/models/whisper-<size>/`; browser: IndexedDB table `models`.
+  - **Where it runs:** desktop: one background thread owns the loaded model (`platform/native/speech.rs`). Browser: a second
+    WebAssembly program, `crates/lectio-worker`, runs as a *Web Worker* (a separate JavaScript thread), so the page stays
+    responsive; the page downloads the model and sends files and audio as *transferred* buffers (moved, not copied). The
+    worker yields between 30-second windows so "Stop" gets through.
+  - **Small is desktop-only:** its weights plus working memory don't fit comfortably in a browser tab's 4 GB
+    WebAssembly limit; the browser shows it disabled with that reason.
+  - **Language:** "Detect" (the first window decides, and the rest keeps it) or one of Whisper's 99 languages.
+  - **Live captions:** every 2 s while recording, the last 8 s of audio go through the same engine; the strip above the
+    input bar shows the text. They need the model to be downloaded already, and pause if the engine is busy.
+  - **Measured on an M2 MacBook Air** (release build, Apple's Accelerate framework for the matrix maths), 54 s of speech:
+    tiny 0.072, base 0.132, small 0.448 times real time (an hour of lecture: about 4, 8 and 27 minutes).
+- **Consequences:** about 1.7 MB more WebAssembly for the worker; the first transcription downloads the model. Accuracy is
+  Whisper's: tiny mishears technical words ("Q" for "queue"). There is no speaker separation yet (ADR-020).
+
+## ADR-017: Playback speed without pitch change, and audio filters
+- **Date:** 2026-11-19
+- **Status:** accepted
+- **Context:** Students replay lectures at 0.5×–2× and skip ±10 s; lecture halls are noisy and recordings often quiet. The
+  filters must also be usable to make a cleaned copy.
+- **Options considered:**
+  - **Resampling (play samples faster).** Trivial, but the voice goes up in pitch ("chipmunk").
+  - **A phase vocoder (FFT-based time-stretching).** High quality for music, but more code, phasey on speech, and needs FFTs
+    on the audio thread.
+  - **WSOLA (chosen for the desktop).** *Waveform-similarity overlap-add*: copy 40 ms pieces of the recording, overlapping
+    by half, stepping through the source faster or slower than through the output, and nudge each piece (±10 ms) so its
+    waveform lines up with the previous one. Cheap, made for speech, and allocation-free after start, so it runs in the
+    real-time playback callback (`lectio_core::stretch::TimeStretcher`).
+  - **Browser:** an `<audio>` element's `playbackRate` with `preservesPitch`, which the browser runs on its own audio thread
+    (chosen for the web; doing WSOLA on the page's main thread would stutter when the UI is busy).
+- **Decision (filters, `lectio_core::dsp`, the same on every target):**
+  - **Noise reduction** is a *downward expander*: below a threshold just above the measured noise floor (the quietest 10% of
+    20 ms frames), audio is turned down further (1:4, at most −30 dB). It quietens hiss between words; it can't remove
+    noise *under* speech, which would need spectral processing.
+  - **Voice boost:** a high-pass biquad at 80 Hz (rumble) and a +6 dB peak at 2.5 kHz (consonants). A *biquad* is a
+    standard second-order filter; the coefficients are the "Audio EQ Cookbook" formulas.
+  - **Normalise:** one gain bringing speech to about −20 dBFS, limited so peaks stay under 0.95 and the gain under +20 dB.
+  - Filters run live while playing (desktop: in the callback; browser: applied to the samples in slices across frames,
+    then played). **"Save cleaned copy"** writes `<session>-clean.wav` next to the original (kept), and playback switches
+    to it (the live filters then stay off, so they aren't applied twice).
+  - Speed steps 0.5–2× (Cmd/Ctrl+Shift+, and .), skip ±10 s (Cmd/Ctrl+[ and ]); speed and filters are saved in
+    `Library.preferences`.
+- **Consequences:** filter maths and the stretcher are unit-tested (gains in dB, pitch by zero-crossings, timing). The
+  browser needs the whole recording decoded in memory to filter it (as before for playback).
+
+## ADR-018: Search by scanning the library, and slide text from the PDF renderer
+- **Date:** 2026-11-19
+- **Status:** accepted
+- **Context:** Search must cover notes, headings, transcripts, slide titles and the text on slides, and jump to the moment.
+- **Options considered:**
+  - **A full-text index (e.g. the `tantivy` search engine).** Fast at scale, but a large dependency, a second store to keep in
+    step with the library on every platform, and more than a term of notes needs.
+  - **Scan the library on each search (chosen).** A term of lectures is a few MB of text; scanning takes milliseconds and
+    can never be out of date.
+  - **Slide text with another PDF library.** Unnecessary: the renderer already interprets every page (ADR-011).
+- **Decision:** `lectio_core::search`: text is folded (lower case, accents removed, one char per char so positions stay
+  valid); every query word must match a whole word, except the last, which may be a prefix (results while typing).
+  Score = kind weight (heading 3, slide title 2.5, note 2, slide text 1.5, transcript 1) × word matches (1 whole, 0.5
+  prefix), plus one weight if the whole query is a phrase; ties go to the newer session, then the earlier moment. Snippets
+  show about 80 characters around the match, starting at a word. Slide text is read once per deck with a small hayro
+  *device* that keeps only the Unicode of each glyph run (`media/slide_text.rs`) and stored in `SlideDeck.page_text`
+  (on the renderer's thread on desktop, one page per frame in the browser). The slides panel's search box lists matching
+  pages.
+- **Consequences:** decks imported before Phase 3 get their text the first time their session is opened. Text in scanned
+  (image-only) PDFs isn't found; that would need OCR.
+
+## ADR-019: Recording computer audio, and screenshots into the feed
+- **Date:** 2026-11-19
+- **Status:** accepted
+- **Context:** Online classes need "Computer audio" or "Microphone + computer", and a quick screenshot of what is shown.
+- **Options considered:**
+  - **macOS ScreenCaptureKit through a binding crate.** Works from macOS 12.3, but it's a second audio path next to cpal
+    and needs a screen-recording session just for sound.
+  - **Each OS's loopback through cpal (chosen).** cpal 0.18 records an *output* device as input: on macOS through a Core
+    Audio process tap (macOS 14.2+), on Windows through WASAPI loopback, and on Linux I pick the default output's
+    PulseAudio/PipeWire *monitor* source through cpal's PulseAudio host (pure Rust, no system library).
+  - **Browser:** `getDisplayMedia` with audio (the user picks a tab or screen and ticks "Share audio"; Chrome and Edge).
+- **Decision:** the recorder opens one cpal stream per source; each has its own lock-free ring; the writer thread converts
+  each to 16 kHz and *mixes* them (the first input sets the pace, a second one is added sample by sample and trimmed if it
+  runs over 0.5 s ahead). In the browser both streams feed the same AudioWorklet, whose input adds them. Sources that can't
+  work are shown disabled with the reason. **Screenshots:** desktop captures the main display with `xcap`, browser grabs one
+  frame of a `getDisplayMedia` video; the user drags over the part to keep, and it becomes a photo note (JPEG) at the moment
+  the button was pressed.
+- **Consequences:** permissions: macOS asks for "Screen & System Audio Recording" (audio) and "Screen Recording"
+  (screenshots); without them the start fails with a message saying where to allow it. If the default output device also has
+  an input (some USB headsets), macOS records that input instead of the tap. Firefox and Safari can't share tab audio. On
+  Linux, `xcap` builds against PipeWire, so CI installs `libpipewire-0.3-dev` and clang.
+
+## ADR-020: Speaker separation: not yet
+- **Date:** 2026-11-19
+- **Status:** accepted (to revisit)
+- **Context:** The feature list asks for speaker separation ("who said what") if a practical local method exists.
+- **Options considered:**
+  - **A neural diarisation pipeline** (a voice-activity model, a speaker-embedding model, then clustering): the accurate way,
+    but it means two more models to download and port to candle, and clustering whose right settings depend on the room.
+  - **Clustering simple features** (pitch, MFCC averages) per segment: cheap, but unreliable for a lecturer plus students in
+    a reverberant hall; wrong labels are worse than none.
+  - **Not yet (chosen).**
+- **Decision:** transcripts have no speaker labels in Phase 3. The `Segment` type can gain an optional speaker field with a
+  serde default later without breaking saved files.
+- **Consequences:** a lecture is treated as one voice; questions from students appear in the same transcript.

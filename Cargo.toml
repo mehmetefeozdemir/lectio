@@ -3,10 +3,10 @@ name = "lectio"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "Lectio: lecture notes timestamped to the audio (Phases 1-2: Capture, Material)"
+description = "Lectio: lecture notes timestamped to the audio (Phases 1-3: Capture, Material, Text and audio)"
 
 [workspace]
-members = ["crates/lectio-core"]
+members = ["crates/lectio-core", "crates/lectio-speech", "crates/lectio-worker"]
 
 # ---- every target: Windows, macOS, Linux and the web (ADR-010) ----
 [dependencies]
@@ -20,12 +20,25 @@ hayro = "0.9"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 tiny-skia = "0.12"
 rfd = "0.18"
+# Phase 3 (ADR-016): local speech-to-text (Whisper on candle, pure Rust, so
+# the same engine builds for the desktop and for the browser's worker).
+lectio-speech = { path = "crates/lectio-speech" }
+serde_json = "1"
 
 # ---- native only: Windows, macOS, Linux ----
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cpal = "0.18"
 directories = "6"
 rtrb = "0.4"
+# Phase 3: downloads the speech model on first use (HTTPS, ADR-016).
+ureq = "3"
+# Phase 3: screen region capture for "Screenshot to feed" (ADR-019).
+xcap = "0.9"
+
+# Linux: system audio comes from PulseAudio/PipeWire "monitor" sources,
+# which cpal reaches through its PulseAudio host (ADR-019).
+[target.'cfg(target_os = "linux")'.dependencies]
+cpal = { version = "0.18", features = ["pulseaudio"] }
 
 # Same winit that eframe uses; needed only for the macOS "don't steal focus"
 # option used by --screenshot.
@@ -81,4 +94,12 @@ web-sys = { version = "0.3", features = [
     "Url",
     "HtmlAnchorElement",
     "Event",
+    # Phase 3: <audio> playback with speed (ADR-017), the speech worker and
+    # model downloads (ADR-016), screen sharing (ADR-019).
+    "HtmlAudioElement",
+    "MediaError",
+    "Worker",
+    "Response",
+    "ReadableStream",
+    "ReadableStreamDefaultReader",
 ] }

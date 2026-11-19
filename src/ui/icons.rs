@@ -50,6 +50,15 @@ pub const FULLSCREEN: &str = "\u{E0A2}"; // arrows-out
 pub const COPY: &str = "\u{E1CA}";
 pub const EXPORT: &str = "\u{EAF0}";
 pub const WAVEFORM: &str = "\u{E802}";
+pub const CAPTIONS: &str = "\u{E1A4}"; // closed-captioning
+pub const SPEED: &str = "\u{E628}"; // gauge
+pub const SOUND: &str = "\u{E434}"; // sliders-horizontal
+pub const SCREENSHOT: &str = "\u{E69A}"; // selection
+pub const DOWNLOAD: &str = "\u{E20C}"; // download-simple
+pub const TRANSCRIPT: &str = "\u{E1A8}"; // subtitles
+pub const TO_FEED: &str = "\u{E17A}"; // chat-text
+pub const COMPUTER: &str = "\u{E560}"; // desktop
+pub const STOP_CIRCLE: &str = "\u{E4F8}"; // x-circle
 
 /// Each label has its own icon, so labels differ by shape, not only colour.
 pub fn label(kind: LabelKind) -> &'static str {

@@ -7,9 +7,11 @@
 //! Layout: database `lectio`, version 2, three object stores (tables):
 //! `library` (key `library.json` → the JSON text),
 //! `recordings` (key `<session-id>.wav` → the WAV bytes) and, since version 2
-//! (Phase 2, ADR-012), `blobs` (key `<uuid>.pdf|png|jpg` → the file's bytes).
+//! (Phase 2, ADR-012), `blobs` (key `<uuid>.pdf|png|jpg` → the file's bytes),
+//! and since version 3 (Phase 3, ADR-016) `models` (key
+//! `whisper-<size>/<file>` → a downloaded speech-model file).
 //! Opening with a higher version makes the browser run `onupgradeneeded`,
-//! which adds any missing table; a Phase 1 database keeps its data.
+//! which adds any missing table; an older database keeps its data.
 
 use js_sys::{Function, Promise};
 use wasm_bindgen::closure::Closure;
@@ -20,10 +22,11 @@ use web_sys::{IdbDatabase, IdbRequest, IdbTransaction, IdbTransactionMode};
 use super::js_err;
 
 const DB_NAME: &str = "lectio";
-const DB_VERSION: u32 = 2;
+const DB_VERSION: u32 = 3;
 pub const LIBRARY: &str = "library";
 pub const RECORDINGS: &str = "recordings";
 pub const BLOBS: &str = "blobs";
+pub const MODELS: &str = "models";
 
 pub async fn open() -> Result<IdbDatabase, String> {
     let factory = web_sys::window()
@@ -48,7 +51,7 @@ pub async fn open() -> Result<IdbDatabase, String> {
 }
 
 fn create_stores(db: &IdbDatabase) {
-    for name in [LIBRARY, RECORDINGS, BLOBS] {
+    for name in [LIBRARY, RECORDINGS, BLOBS, MODELS] {
         if !db.object_store_names().contains(name) {
             // An error here surfaces as a failed open, reported by `open`.
             let _ = db.create_object_store(name);

@@ -7,14 +7,15 @@ use lectio_core::Session;
 use lectio_core::material::SlideDeck;
 
 use super::theme::{self, palette, radius, size, space};
-use super::{View, icons, widgets};
+use super::{Buffers, View, icons, widgets};
+use lectio_core::search::search_deck;
 use crate::action::Action;
 use crate::material::PageView;
 
 const ZOOM_STEP: f32 = 0.25;
 const STRIP_BUTTON: f32 = 30.0;
 
-pub fn show(ui: &mut egui::Ui, view: &View, session: &Session, actions: &mut Vec<Action>) {
+pub fn show(ui: &mut egui::Ui, view: &View, session: &Session, buffers: &mut Buffers, actions: &mut Vec<Action>) {
     tabs(ui, view, actions);
     ui.add_space(space::M);
     if view.material.is_importing() {
@@ -25,7 +26,7 @@ pub fn show(ui: &mut egui::Ui, view: &View, session: &Session, actions: &mut Vec
     }
     let shown = view.material.viewer.deck.and_then(|d| session.decks.iter().find(|x| x.id == d));
     egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| match shown {
-        Some(deck) => deck_view(ui, view, session, deck, actions),
+        Some(deck) => deck_view(ui, view, session, deck, buffers, actions),
         None if session.decks.is_empty() => {
             let action = view.can_import.then_some((icons::PDF, "Import PDF"));
             let message = "Import the lecture's PDF to see its slides beside your notes.";
@@ -57,7 +58,7 @@ fn tabs(ui: &mut egui::Ui, view: &View, actions: &mut Vec<Action>) {
     });
 }
 
-fn deck_view(ui: &mut egui::Ui, view: &View, session: &Session, deck: &SlideDeck, actions: &mut Vec<Action>) {
+fn deck_view(ui: &mut egui::Ui, view: &View, session: &Session, deck: &SlideDeck, buffers: &mut Buffers, actions: &mut Vec<Action>) {
     let p = palette(ui);
     let page = view.material.viewer.page;
     ui.horizontal(|ui| {
@@ -82,7 +83,7 @@ fn deck_view(ui: &mut egui::Ui, view: &View, session: &Session, deck: &SlideDeck
             widgets::name(&menu.response, Role::Button, "Slide deck actions");
         });
     });
-    page_search(ui);
+    page_search(ui, deck, buffers, actions);
     ui.add_space(space::S);
     page_strip(ui, deck, page, actions);
     ui.add_space(space::S);
@@ -100,12 +101,32 @@ fn deck_view(ui: &mut egui::Ui, view: &View, session: &Session, deck: &SlideDeck
     });
 }
 
-/// Searching the text on slides needs text extraction (Phase 3).
-fn page_search(ui: &mut egui::Ui) {
-    let mut empty = String::new();
-    let hint = widgets::icon_text(icons::SEARCH, "Search slides (coming in Phase 3)", theme::regular(size::CAPTION), palette(ui).text_muted);
-    let field = ui.add_enabled(false, egui::TextEdit::singleline(&mut empty).hint_text(hint).desired_width(f32::INFINITY));
-    widgets::name(&field, Role::TextInput, "Search slides (not available yet)");
+/// Finds pages by the text on them (extracted from the PDF, ADR-018).
+fn page_search(ui: &mut egui::Ui, deck: &SlideDeck, buffers: &mut Buffers, actions: &mut Vec<Action>) {
+    let p = palette(ui);
+    let ready = !deck.page_text.is_empty();
+    let prompt = if ready { "Search these slides" } else { "Reading the slide text…" };
+    let hint = widgets::icon_text(icons::SEARCH, prompt, theme::regular(size::CAPTION), p.text_muted);
+    let field = egui::TextEdit::singleline(&mut buffers.slide_search).hint_text(hint).desired_width(f32::INFINITY);
+    let field = ui.add_enabled(ready, field);
+    widgets::name(&field, Role::SearchInput, "Search slides");
+    if !ready || buffers.slide_search.trim().is_empty() {
+        return;
+    }
+    let pages = search_deck(deck, &buffers.slide_search);
+    ui.horizontal_wrapped(|ui| {
+        if pages.is_empty() {
+            ui.label(RichText::new("No slide has that text.").size(size::SMALL).color(p.text_muted));
+            return;
+        }
+        ui.label(RichText::new("Found on").size(size::SMALL).color(p.text_muted));
+        for page in pages {
+            let chip = widgets::neutral_chip(ui, None, &page.to_string(), true, &format!("Show slide {page}"));
+            if chip.clicked() {
+                actions.push(Action::GoToSlide(lectio_core::material::SlideLink { deck: deck.id, page }));
+            }
+        }
+    });
 }
 
 /// Page numbers in a row: click to jump to a page.

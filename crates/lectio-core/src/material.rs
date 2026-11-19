@@ -136,6 +136,10 @@ pub struct SlideDeck {
     pub title: String,
     pub blob: BlobKey,
     pub page_count: u32,
+    /// The text on each page (index 0 = page 1), for search. Filled after
+    /// import; empty for decks imported before Phase 3 until it is extracted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub page_text: Vec<String>,
 }
 
 /// "This note is about page `page` (1-based) of deck `deck`."
@@ -210,7 +214,7 @@ impl Library {
         if page_count == 0 {
             return Err(ModelError::PageOutOfRange { page: 1, page_count });
         }
-        let deck = SlideDeck { id: DeckId::new_random(), title: deck_title(file_name), blob, page_count };
+        let deck = SlideDeck { id: DeckId::new_random(), title: deck_title(file_name), blob, page_count, page_text: Vec::new() };
         let id = deck.id;
         let next = self.map_session(session, |s| {
             let mut changed = s.clone();

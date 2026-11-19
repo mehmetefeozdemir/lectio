@@ -1,0 +1,28 @@
+[package]
+name = "lectio-speech"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Lectio speech-to-text: Whisper on candle (pure Rust), shared by the desktop app and the browser worker (ADR-016)."
+
+[dependencies]
+lectio-core = { path = "../lectio-core" }
+candle-core = "0.11"
+candle-nn = "0.11"
+candle-transformers = "0.11"
+rustfft = "6.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+
+# candle depends on `getrandom` 0.3, which refuses to build for the browser
+# unless told to use `crypto.getRandomValues` (PROBLEMS P-024).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
+# Apple's Accelerate framework does the matrix maths much faster on macOS
+# (it ships with the OS, so nothing extra to install).
+[target.'cfg(target_os = "macos")'.dependencies]
+candle-core = { version = "0.11", features = ["accelerate"] }
+candle-nn = { version = "0.11", features = ["accelerate"] }
+candle-transformers = { version = "0.11", features = ["accelerate"] }

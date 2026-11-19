@@ -42,7 +42,15 @@ pub fn feed(ui: &mut egui::Ui, view: &View, session: &Session, buffers: &mut Buf
     let follow: Follow = ui.ctx().data(|d| d.get_temp(follow_id)).unwrap_or_default();
     let must_follow = follow.must_follow(active);
     let shown_slide = view.material.shown_slide(session);
+    // A clear edge under the header instead of egui's scroll fade, which
+    // painted over the top card and made it look hidden under the header
+    // (PROBLEMS P-025).
+    let edge = ui.cursor().top() + space::XS;
+    ui.painter().hline(ui.max_rect().x_range(), edge, egui::Stroke::new(1.0, p.border));
+    ui.add_space(space::XS * 2.0);
+    ui.spacing_mut().scroll.fade.strength = 0.0;
     let scroll = egui::ScrollArea::vertical().auto_shrink([false, false]).stick_to_bottom(!playback).show(ui, |ui| {
+        ui.add_space(space::S);
         for (index, note) in session.notes.iter().enumerate() {
             let is_active = active == Some(index);
             let item = Item { note, playback, active: is_active, shown_slide };

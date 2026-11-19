@@ -4,3 +4,6 @@ target = "index.html"
 dist = "dist"
 # Relative URLs, so the site also works from a sub-folder (e.g. GitHub Pages).
 public_url = "./"
+# Fixed file names (no content hash), so the app can start the speech worker
+# as ./lectio-worker_loader.js (ADR-016).
+filehash = false

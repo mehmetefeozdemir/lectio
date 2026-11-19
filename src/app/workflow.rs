@@ -38,6 +38,10 @@ impl LectioApp {
             Action::GoTo(screen) => {
                 self.ui_state.screen = screen;
                 self.material.reading = false;
+                if screen == Screen::Search {
+                    // Results reflect edits made since the last search.
+                    self.run_search(self.speech.query.clone());
+                }
             }
             Action::TrashSession(session) => self.trash_session(session),
             Action::RestoreSession(session) => {
@@ -58,7 +62,12 @@ impl LectioApp {
                 let prefs = Preferences { theme: choice_from(theme), ..self.library.preferences().clone() };
                 self.library = self.library.with_preferences(prefs);
             }
-            other => self.apply_material(other),
+            other => {
+                let rest = self.apply_speech(other).and_then(|a| self.apply_audio(a));
+                if let Some(action) = rest {
+                    self.apply_material(action);
+                }
+            }
         }
     }
 
@@ -170,10 +179,20 @@ impl LectioApp {
         let prefs = Preferences {
             show_slides: shown("slides"),
             show_feed: shown("feed"),
-            show_audio: shown("audio"),
+            show_audio: shown("audio") || shown("transcript"),
+            show_transcript_tab: shown("transcript"),
             ..self.library.preferences().clone()
         };
         self.library = self.library.with_preferences(prefs);
+        self
+    }
+
+    /// Opens the Search page with `query` already typed (used for screenshots).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub fn with_search(mut self, query: &str) -> Self {
+        self.ui_state.screen = Screen::Search;
+        self.buffers.search = query.to_owned();
+        self.run_search(query.to_owned());
         self
     }
 

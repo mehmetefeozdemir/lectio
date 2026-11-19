@@ -314,3 +314,87 @@ Every bug, dead end and wrong turn while building Lectio, with the root cause, w
   (a flat bar); renamed the test to five labels; sorted with `sort_by_key(|(_, s)| Reverse(s.created_unix_ms))`.
 - **Lesson:** Exhaustive matches turn "did I update every place?" into a compiler error. Add new enum variants at the end
   so saved data and shortcuts that depend on order keep their meaning.
+
+## P-024: The speech engine wouldn't build for the browser (`getrandom`)
+- **Phase:** 3
+- **Symptom:** `cargo check -p lectio-speech --target wasm32-unknown-unknown` stopped with
+  `The wasm32-unknown-unknown targets are not supported by default; you may need to enable the "wasm_js" configuration flag`
+  from `getrandom 0.3.4`.
+- **Root cause:** candle pulls in `rand` 0.9 → `getrandom` 0.3, which refuses to guess where randomness comes from in a
+  browser. (Phase 1 hit the same with `uuid` and `getrandom` 0.2, P-008.)
+- **Tried:** the error suggests a `--cfg getrandom_backend="wasm_js"` compiler flag as well; I prepared a
+  `.cargo/config.toml`, but checked first with the feature alone.
+- **Fix:** `getrandom = { version = "0.3", features = ["wasm_js"] }` for the wasm32 target in `crates/lectio-speech/Cargo.toml`.
+  The feature alone was enough for this version, so no config file was needed.
+- **Lesson:** when a transitive dependency breaks the browser build, `cargo tree -i <crate> --target wasm32-unknown-unknown`
+  shows who pulls it in; then fix it once, in the crate that owns that dependency.
+
+## P-025: The top card in the feed looked half hidden under the panel header
+- **Phase:** 3 (reported after the session-workflow screens)
+- **Symptom:** when the feed was scrolled, the first visible card looked tucked under the "Feed · 12" header and faded out.
+- **Root cause:** egui 0.37 paints a *scroll fade*, a 20 px gradient in the panel's background colour, over the top and
+  bottom of a scroll area that has more content. The feed's cards are white on a grey panel, so the grey gradient over a
+  white card read as "covered", and there was no line between header and list.
+- **Fix:** in `ui/notes.rs` the feed turns the fade off (`ui.spacing_mut().scroll.fade.strength = 0.0`), draws a 1 px divider
+  under the header, and adds a small top margin inside the list.
+- **Lesson:** a library's default visual effect can clash with a design system; check edge states (scrolled, empty, long)
+  in screenshots, not only the first view.
+
+## P-026: The transcript panel grew and crushed the feed into a thin column
+- **Phase:** 3
+- **Symptom:** in the browser flow screenshot (1400 px wide) the right panel took about 1000 px and the feed showed its hint
+  text one letter per line.
+- **Root cause:** egui side panels grow to fit their content's width. Something in the Transcript tab (the settings row and
+  long lines before wrapping settled) asked for more width on the first frames, and a resizable panel keeps the size it grew to.
+- **Fix:** `ui/workspace.rs` caps each side panel at 30% of the window (`SIDE_PANEL_MAX_SHARE`), so the feed always keeps
+  at least 40%.
+- **Lesson:** give every resizable panel a maximum, not just a minimum and a default.
+
+## P-027: candle's mel spectrogram starts threads, which the browser build can't
+- **Phase:** 3
+- **Symptom:** none at run time: I found it while reading `candle-transformers`' `whisper/audio.rs` before using it. It calls
+  `std::thread::scope` with up to 12 threads; on `wasm32-unknown-unknown` creating a thread panics.
+- **Root cause:** candle's helper is written for desktops.
+- **Fix:** my own single-threaded spectrogram in `crates/lectio-speech/src/mel.rs` (Hann window, `rustfft`, Slaney mel
+  filters, Whisper's log scaling), with tests for the mel scale, the filter shapes, and that a 1 kHz tone lights up the right
+  band. It takes milliseconds per 30-second window, so threads weren't needed anyway.
+- **Lesson:** "it compiles for wasm" doesn't mean "it runs in the browser"; read what a helper does before relying on it.
+
+## P-028: The browser test's fake microphone recorded a beep instead of my speech file
+- **Phase:** 3
+- **Symptom:** the Phase 3 browser flow recorded 20 s with Chrome's fake microphone set to a speech WAV
+  (`--use-file-for-fake-audio-capture`), but the transcript was only "you", which is what Whisper typically says about
+  silence or a tone.
+- **Root cause:** the WAV, made with macOS `afconvert`, had an `FLLR` padding chunk between the format and data chunks
+  (`xxd` showed `FLLR` at byte 36). Chrome's fake-audio reader expects the data right after the format, rejected the file,
+  and fell back to its default beep.
+- **Tried:** a plain rewrite of the WAV (Python's `wave` module) — still the beep in headless Chrome.
+- **Fix:** the flow now records (testing capture), then puts a known 15 s speech clip in place of that recording in
+  IndexedDB (`--replace-recording`), reloads, and transcribes: 5 segments came back in the worker, with the right words.
+- **Lesson:** separate what a test is checking: microphone capture and transcription are now tested by different steps, so a
+  quirk of the fake microphone can't hide a transcription bug (or fake a pass).
+
+## P-029: trunk names the worker's files with content hashes
+- **Phase:** 3
+- **Symptom:** the app has to start the worker with `new Worker(url)`, but trunk writes `lectio-worker-<hash>_loader.js`,
+  and the hash changes with every build.
+- **Root cause:** trunk's default `filehash = true` (good for browser caching of the main app, whose script tag trunk writes
+  itself); for a worker the app starts from Rust, nothing rewrites the URL.
+- **Fix:** `filehash = false` in `Trunk.toml`, and `data-loader-shim` on the worker's `<link>`, so trunk writes a small
+  `lectio-worker_loader.js` that loads the worker's WebAssembly. The app uses that fixed name (`platform/web/speech.rs`).
+- **Lesson:** a build tool's "rename for caching" must be matched by every place that refers to the file by name.
+
+## P-030: Search snippets started in the middle of a word ("…oday we look at…")
+- **Phase:** 3
+- **Symptom:** in the browser flow, searching "graph" showed "…oday we look at GraphTraversal, a graph is…".
+- **Root cause:** the snippet started a fixed 30 characters before the match, wherever that landed.
+- **Fix:** test first (`snippets_start_at_the_beginning_of_a_word`, failed), then `search.rs` steps the start back (at most
+  15 characters) to the beginning of the word; reaching the start of the text means no "…".
+
+## P-031: New lints on new code (clippy `-D warnings`)
+- **Phase:** 3
+- **Symptom:** `manual implementation of .is_multiple_of()` in the speed label, `large size difference between variants` for
+  the browser player's state enum, and `unused dependency lectio-speech` for the worker crate on the desktop target.
+- **Fix:** `percent.is_multiple_of(100)`; `State::Ready(Box<Loaded>)`; the worker's dependencies moved under
+  `[target.'cfg(target_arch = "wasm32")'.dependencies]`, since on the desktop the worker binary is empty.
+- **Lesson:** run clippy for both targets (`--workspace` and `--target wasm32-unknown-unknown`): each target sees different code.

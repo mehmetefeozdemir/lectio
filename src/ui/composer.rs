@@ -13,7 +13,7 @@ use super::{LABEL_KEYS, POST_SLIDE, View, icons, shortcut_hint, widgets};
 use crate::action::Action;
 
 /// Room right of the text field for the attach icons and the send button.
-const ATTACH_WIDTH: f32 = 4.0 * 36.0 + 40.0;
+const ATTACH_WIDTH: f32 = 5.0 * 36.0 + 40.0;
 
 pub fn show(ui: &mut egui::Ui, view: &View, actions: &mut Vec<Action>) {
     let enabled = view.can_take_notes;
@@ -98,5 +98,9 @@ fn attach_icons(ui: &mut egui::Ui, view: &View, actions: &mut Vec<Action>) {
     }
     if widgets::icon_button(ui, icons::SKETCH, "Add a sketch", enabled).clicked() {
         actions.push(Action::OpenSketch);
+    }
+    let label = "Screenshot part of the screen into the feed";
+    if view.screenshots && widgets::icon_button(ui, icons::SCREENSHOT, label, enabled).clicked() {
+        actions.push(Action::TakeScreenshot);
     }
 }

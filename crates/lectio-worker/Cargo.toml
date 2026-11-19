@@ -1,0 +1,21 @@
+[package]
+name = "lectio-worker"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Lectio's browser speech worker: runs the Whisper engine off the page's main thread (ADR-016)."
+
+[[bin]]
+name = "lectio-worker"
+path = "src/main.rs"
+
+# Everything is browser-only: on the desktop this binary is empty (the
+# desktop app runs the same engine on a thread instead).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+lectio-core = { path = "../lectio-core" }
+lectio-speech = { path = "../lectio-speech" }
+serde_json = "1"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["DedicatedWorkerGlobalScope", "MessageEvent", "WorkerGlobalScope"] }

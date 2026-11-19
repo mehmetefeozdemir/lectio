@@ -6,6 +6,8 @@ use std::process::ExitCode;
 
 use eframe::egui;
 
+use lectio_core::prefs::SpeechModel;
+
 use crate::action::Screen;
 use crate::app::{LectioApp, Startup};
 use crate::platform::native::NativePlatform;
@@ -14,13 +16,15 @@ use crate::self_test;
 const WINDOW_TITLE: &str = "Lectio";
 const DEFAULT_WINDOW_SIZE: [f32; 2] = [1120.0, 740.0];
 const MIN_WINDOW_SIZE: [f32; 2] = [640.0, 420.0];
-const USAGE: &str = "Usage: lectio [--screenshot <file.png> | --self-test-audio <seconds>]";
+const USAGE: &str = "Usage: lectio [--screenshot <file.png> | --self-test-audio <seconds> | \
+                     --transcribe <file.wav> [--model tiny|base|small] [--language <code>]]";
 
 #[derive(Debug)]
 enum Mode {
     Normal,
     Screenshot(PathBuf),
     SelfTestAudio(u64),
+    Transcribe { wav: PathBuf, model: SpeechModel, language: Option<String> },
 }
 
 pub fn run() -> ExitCode {
@@ -34,6 +38,7 @@ pub fn run() -> ExitCode {
 
     let screenshot_path = match mode {
         Mode::SelfTestAudio(seconds) => return self_test::run(seconds),
+        Mode::Transcribe { wav, model, language } => return transcribe(&wav, model, language.as_deref()),
         Mode::Screenshot(path) => Some(path),
         Mode::Normal => None,
     };
@@ -51,6 +56,7 @@ pub fn run() -> ExitCode {
                 Ok("home") => app.with_screen(Screen::Home),
                 Ok("trash") => app.with_screen(Screen::Trash),
                 Ok("collections") => app.with_screen(Screen::Collections),
+                Ok("search") => app.with_search(&std::env::var("LECTIO_SEARCH").unwrap_or_default()),
                 _ => app,
             };
             // Test aid: LECTIO_PANELS=feed,audio shows only those workspace panels.
@@ -83,10 +89,42 @@ fn parse_args(args: Vec<String>) -> Result<Mode, String> {
         [flag] if flag == "--screenshot" => Err("--screenshot needs a file name".into()),
         [flag, seconds] if flag == "--self-test-audio" => parse_seconds(seconds).map(Mode::SelfTestAudio),
         [flag] if flag == "--self-test-audio" => Err("--self-test-audio needs a number of seconds".into()),
+        [flag, wav, rest @ ..] if flag == "--transcribe" => parse_transcribe(wav, rest),
+        [flag] if flag == "--transcribe" => Err("--transcribe needs a WAV file (16 kHz mono)".into()),
         [flag, ..] if flag == "--help" || flag == "-h" => {
             Err("Lectio: lecture notes timestamped to the audio.".into())
         }
         other => Err(format!("Unknown arguments: {}", other.join(" "))),
+    }
+}
+
+fn parse_transcribe(wav: &str, rest: &[String]) -> Result<Mode, String> {
+    let mut model = SpeechModel::Tiny;
+    let mut language = None;
+    for pair in rest.chunks(2) {
+        match pair {
+            [flag, value] if flag == "--model" => {
+                model = SpeechModel::ALL
+                    .into_iter()
+                    .find(|m| m.name() == value)
+                    .ok_or("--model must be tiny, base or small")?;
+            }
+            [flag, value] if flag == "--language" => language = Some(value.clone()),
+            other => return Err(format!("Unknown arguments: {}", other.join(" "))),
+        }
+    }
+    Ok(Mode::Transcribe { wav: PathBuf::from(wav), model, language })
+}
+
+/// Transcribes a file and prints the real-time factor.
+fn transcribe(wav: &std::path::Path, model: SpeechModel, language: Option<&str>) -> ExitCode {
+    let models = crate::platform::native::models_dir();
+    match crate::platform::native::transcribe_cli(&models, wav, model, language) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("Transcription failed: {e}");
+            ExitCode::FAILURE
+        }
     }
 }
 

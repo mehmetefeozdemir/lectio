@@ -233,7 +233,7 @@ fn linking_a_slide_does_not_move_a_note_on_the_timeline() {
 #[test]
 fn a_photo_after_the_end_of_the_recording_is_refused() {
     let (lib, session) = library_with_session();
-    let rec = Recording { file_name: "a.wav".into(), duration_ms: 1_000, sample_rate: 16_000 };
+    let rec = Recording { file_name: "a.wav".into(), duration_ms: 1_000, sample_rate: 16_000, cleaned_file: None };
     let lib = lib.with_recording(session, rec).unwrap();
     let err = lib.with_attachment_note(session, 1_001, photo(10, 10), "", &[]).unwrap_err();
     assert_eq!(err, ModelError::OffsetOutOfRange);

@@ -9,6 +9,7 @@ use lectio_core::timeline::format_offset;
 use super::theme::{self, palette, size, space};
 use super::{View, icons, shortcut_hint, widgets};
 use crate::action::Action;
+use crate::platform::CaptureSource;
 
 const BIG_BUTTON: f32 = 40.0;
 const METER_BAR: f32 = 3.0;
@@ -33,9 +34,19 @@ pub fn bar(ui: &mut egui::Ui, view: &View, phase: RecorderPhase, actions: &mut V
             .on_hover_text("Time recorded so far. Pauses don't count.");
         ui.label(RichText::new(status).font(theme::semibold(size::CAPTION)).color(color));
         if phase == RecorderPhase::Idle {
-            source_picker(ui);
+            source_picker(ui, view, actions);
+        } else if view.source != CaptureSource::Microphone {
+            ui.label(widgets::icon_text(icons::COMPUTER, view.source.label(), theme::regular(size::SMALL), p.text_muted));
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if view.speech.captions_supported {
+                let mut on = view.prefs.captions;
+                let switch = widgets::switch(ui, &mut on, "Live captions");
+                if switch.on_hover_text("Live captions while recording (made on this device)").changed() {
+                    actions.push(Action::SetCaptions(on));
+                }
+                ui.label(widgets::icon(icons::CAPTIONS, size::ICON, p.text_muted));
+            }
             let can_stop = matches!(phase, RecorderPhase::Recording | RecorderPhase::Paused);
             let hint = shortcut_hint(ui.ctx(), Modifiers::COMMAND | Modifiers::SHIFT, Key::R);
             let label = format!("Stop and save ({hint})");
@@ -50,19 +61,27 @@ pub fn bar(ui: &mut egui::Ui, view: &View, phase: RecorderPhase, actions: &mut V
     audio_hints(ui, view, phase);
 }
 
-/// Where the audio comes from. Only the microphone works for now; the
-/// other two are shown so the user knows they are planned (Phase 3).
-fn source_picker(ui: &mut egui::Ui) {
+/// Where the audio comes from (ADR-019). Sources this platform can't record
+/// stay visible but disabled, with the reason as a tooltip.
+fn source_picker(ui: &mut egui::Ui, view: &View, actions: &mut Vec<Action>) {
     let p = palette(ui);
-    let selected = widgets::icon_text(icons::MICROPHONE, "Microphone", theme::regular(size::CAPTION), p.text);
+    let icon = |s: CaptureSource| if s == CaptureSource::Microphone { icons::MICROPHONE } else { icons::COMPUTER };
+    let selected = widgets::icon_text(icon(view.source), view.source.label(), theme::regular(size::CAPTION), p.text);
     let combo = egui::ComboBox::from_id_salt("audio-source").selected_text(selected).show_ui(ui, |ui| {
-        let _ = ui.selectable_label(true, "Microphone");
-        for source in ["Computer audio", "Both"] {
-            ui.add_enabled(false, egui::Button::selectable(false, source)).on_disabled_hover_text("Coming soon");
+        for (source, support) in CaptureSource::ALL.into_iter().zip(view.sources) {
+            let item = ui.add_enabled(support.is_ok(), egui::Button::selectable(source == view.source, source.label()));
+            widgets::name(&item, Role::Button, &format!("Record {}", source.label()));
+            let item = match support {
+                Err(why) => item.on_disabled_hover_text(why),
+                Ok(()) => item,
+            };
+            if item.clicked() {
+                actions.push(Action::SetSource(source));
+            }
         }
     });
     widgets::name(&combo.response, Role::ComboBox, "Audio source");
-    combo.response.on_hover_text("Audio source");
+    combo.response.on_hover_text("What to record: the microphone, what the computer plays (online classes), or both");
 }
 
 fn record_button(ui: &mut egui::Ui, phase: RecorderPhase, actions: &mut Vec<Action>) {

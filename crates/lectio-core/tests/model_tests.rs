@@ -159,7 +159,7 @@ fn label_name_must_not_be_blank() {
 #[test]
 fn recording_can_be_attached_once() {
     let (lib, session) = library_with_session();
-    let rec = Recording { file_name: "a.wav".into(), duration_ms: 60_000, sample_rate: 16_000 };
+    let rec = Recording { file_name: "a.wav".into(), duration_ms: 60_000, sample_rate: 16_000, cleaned_file: None };
 
     let lib = lib.with_recording(session, rec.clone()).unwrap();
     let err = lib.with_recording(session, rec).unwrap_err();
@@ -171,7 +171,7 @@ fn recording_can_be_attached_once() {
 #[test]
 fn note_after_the_end_of_the_recording_is_rejected() {
     let (lib, session) = library_with_session();
-    let rec = Recording { file_name: "a.wav".into(), duration_ms: 1_000, sample_rate: 16_000 };
+    let rec = Recording { file_name: "a.wav".into(), duration_ms: 1_000, sample_rate: 16_000, cleaned_file: None };
     let lib = lib.with_recording(session, rec).unwrap();
 
     assert!(lib.with_note(session, 1_000, "end", &[]).is_ok());

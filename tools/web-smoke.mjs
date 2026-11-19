@@ -29,7 +29,7 @@
 // DevTools Protocol, so it needs no npm install.
 
 import { spawn } from "node:child_process";
-import { writeFileSync, mkdtempSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdtempSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -71,11 +71,30 @@ const FLOWS = {
     // slide 2 (posted), a heading, the sketch and the photo, all linked to a
     // slide ("link new notes" is on); 2 images; 1 deck; 3 blobs (PDF, sketch
     // PNG, photo JPEG), read back after the reload.
-    "--expect-stored", "notes=6,linked=6,slides=2,attachments=2,decks=1,blobs=3",
+    "--expect-stored", "notes=6,linked=6,slides=2,attachments=2,decks=1,blobs=3,slide_text=1",
     "--click-name", "Session: Lecture 1", "--wait", "3000", "--shot", "shots/web-flow-after-reload.png",
     "--click-name", "Reading view", "--wait", "1500", "--shot", "shots/web-flow-reading.png",
     "--scroll", "700,500,700", "--scroll", "700,500,700", "--wait", "800", "--shot", "shots/web-flow-reading-photo.png",
     "--click-name", "Back to sessions", "--wait", "800", "--shot", "shots/workflow-web-home.png",
+    // Phase 3: search finds the slide's own text (read from the PDF).
+    "--click-name", "Search", "--wait", "500", "--click-name", "Search everything", "--type", "distance",
+    "--wait", "800", "--shot", "shots/phase3-web-search.png",
+  ],
+  // Phase 3, local only (downloads the 151 MB tiny model): record, put a known
+  // 15 s speech clip in place of the recording (target/speech-15s.wav, made
+  // with the macOS "say" voice), transcribe it in the speech worker, search.
+  phase3: [
+    "--click-name", "Add a course", "--type", "CSCA67", "--key", "Enter", "--wait", "500",
+    "--click-name", "New session", "--wait", "800",
+    "--click-name", "Start recording", "--wait", "20000",
+    "--click-name", "Stop and save", "--wait", "2500",
+    "--replace-recording", "target/speech-15s.wav", "--reload", "--wait", "1500",
+    "--click-name", "Session: Lecture 1", "--wait", "1500",
+    "--click-name", "Transcript tab in the right panel", "--wait", "500",
+    "--click-name", "Transcribe", "--wait", "5000", "--shot", "shots/phase3-web-downloading.png",
+    "--wait-stored", "segments>=3,600", "--wait", "1500", "--shot", "shots/phase3-web-transcript.png",
+    "--click-name", "Back to sessions", "--wait", "500", "--click-name", "Search", "--wait", "500",
+    "--click-name", "Search everything", "--type", "graph", "--wait", "800", "--shot", "shots/phase3-web-search-transcript.png",
   ],
 };
 
@@ -109,6 +128,8 @@ const chrome = spawn(CHROME, [
   "--enable-unsafe-swiftshader",
   "--use-fake-ui-for-media-stream",
   "--use-fake-device-for-media-stream",
+  // LECTIO_FAKE_AUDIO=speech.wav: the fake microphone plays this file (Phase 3 flow).
+  ...(process.env.LECTIO_FAKE_AUDIO ? [`--use-file-for-fake-audio-capture=${process.env.LECTIO_FAKE_AUDIO}`] : []),
   "--autoplay-policy=no-user-gesture-required",
   "--window-size=1400,900",
   "about:blank",
@@ -252,6 +273,30 @@ async function runSteps(cdp, args) {
         i++;
         break;
       }
+      case "--replace-recording": {
+        // Puts a known WAV in place of the first recorded session's audio, so
+        // transcription can be checked with real speech (Phase 3 flow).
+        const name = await replaceRecording(cdp, readFileSync(value).toString("base64"));
+        console.log(`replaced recording ${name}`);
+        i++;
+        break;
+      }
+      case "--wait-stored": {
+        // "segments>=1,300": poll IndexedDB until the count is reached (or the seconds run out).
+        const [condition, seconds] = value.split(",");
+        const [key, want] = condition.split(">=");
+        const deadline = Date.now() + Number(seconds) * 1000;
+        let actual = {};
+        while (Date.now() < deadline) {
+          actual = await storedCounts(cdp);
+          if (actual[key] >= Number(want)) break;
+          await sleep(2000);
+        }
+        console.log(`stored after waiting: ${JSON.stringify(actual)}`);
+        if (!(actual[key] >= Number(want))) throw new Error(`stored ${key} stayed at ${actual[key]}`);
+        i++;
+        break;
+      }
       default:
         throw new Error(`unknown step ${step}`);
     }
@@ -290,6 +335,33 @@ async function findNamed(cdp, name) {
   throw new Error(`no control named "${name}" (is #test in the URL?)`);
 }
 
+async function replaceRecording(cdp, base64) {
+  const expression = `(async () => {
+    const bytes = Uint8Array.from(atob("${base64}"), (c) => c.charCodeAt(0));
+    const db = await new Promise((ok, fail) => {
+      const r = indexedDB.open("lectio");
+      r.onsuccess = () => ok(r.result);
+      r.onerror = () => fail(r.error);
+    });
+    const json = await new Promise((ok, fail) => {
+      const r = db.transaction("library").objectStore("library").get("library.json");
+      r.onsuccess = () => ok(r.result);
+      r.onerror = () => fail(r.error);
+    });
+    const name = JSON.parse(json).courses.flatMap((c) => c.sessions).find((s) => s.recording).recording.file_name;
+    await new Promise((ok, fail) => {
+      const t = db.transaction("recordings", "readwrite");
+      t.objectStore("recordings").put(bytes, name);
+      t.oncomplete = () => ok();
+      t.onerror = () => fail(t.error);
+    });
+    return name;
+  })()`;
+  const res = await cdp.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+  if (res.exceptionDetails) throw new Error(`replacing the recording failed: ${res.exceptionDetails.text}`);
+  return res.result.value;
+}
+
 /** Counts what Lectio saved in IndexedDB "lectio" (see src/platform/web/idb.rs). */
 async function storedCounts(cdp) {
   const expression = `(async () => {
@@ -311,6 +383,8 @@ async function storedCounts(cdp) {
       notes: notes.length,
       linked: notes.filter((n) => n.slide).length,
       slides: notes.filter((n) => n.kind === "slide").length,
+      slide_text: sessions.flatMap((s) => s.decks || []).filter((d) => (d.page_text || []).length > 0).length,
+      segments: sessions.flatMap((s) => (s.transcript ? s.transcript.segments : [])).length,
       attachments: notes.filter((n) => n.attachment).length,
       decks: sessions.flatMap((s) => s.decks || []).length,
       blobs,

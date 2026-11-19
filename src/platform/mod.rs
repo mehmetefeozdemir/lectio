@@ -15,6 +15,7 @@
 //! The rules (model, clock, seek maths, resampling) stay in `lectio-core`,
 //! which has no platform code and compiles for every target.
 
+pub mod speech;
 pub mod wav;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -26,6 +27,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use eframe::egui;
+use lectio_core::dsp::FilterSettings;
 use lectio_core::material::BlobKey;
 use lectio_core::storage::LibraryStore;
 
@@ -35,8 +37,8 @@ pub const STORE_SAMPLE_RATE: u32 = 16_000;
 /// Everything the app needs from the machine it runs on.
 pub trait Platform {
     fn store(&self) -> &dyn LibraryStore;
-    /// Starts recording into the audio item called `file_name`.
-    fn start_capture(&self, file_name: &str) -> Result<Box<dyn AudioCapture>, AudioError>;
+    /// Starts recording `source` into the audio item called `file_name`.
+    fn start_capture(&self, file_name: &str, source: CaptureSource) -> Result<Box<dyn AudioCapture>, AudioError>;
     /// Opens the audio item called `file_name` for playback.
     fn open_playback(&self, file_name: &str) -> Result<Box<dyn AudioPlayback>, AudioError>;
     /// What to tell the student when the microphone can't be used.
@@ -64,6 +66,54 @@ pub trait Platform {
     /// Whether to offer "Take photo" at all.
     fn supports_camera(&self) -> bool {
         false
+    }
+
+    // ---- Phase 3: text and audio (ADR-016, ADR-019) ----
+
+    /// Starts the speech-to-text service (call once; it owns a thread or worker).
+    fn speech(&self) -> Option<Box<dyn speech::SpeechService>> {
+        None
+    }
+    /// `Err(why)` if this source can't be recorded here (shown as a tooltip).
+    fn source_support(&self, source: CaptureSource) -> Result<(), &'static str> {
+        match source {
+            CaptureSource::Microphone => Ok(()),
+            _ => Err("Recording computer audio isn't possible here."),
+        }
+    }
+    /// A stored recording's WAV bytes (for the cleaned copy).
+    fn read_recording(&self, file_name: &str) -> Pending<Vec<u8>>;
+    /// Stores WAV bytes as a recording (the cleaned copy).
+    fn write_recording(&self, file_name: &str, bytes: Vec<u8>) -> Result<(), String>;
+    /// A picture of the whole screen, for "Screenshot to feed" (ADR-019).
+    fn capture_screen(&self) -> Pending<egui::ColorImage> {
+        Pending::ready(Err("Screenshots aren't possible here.".into()))
+    }
+    fn supports_screenshot(&self) -> bool {
+        false
+    }
+}
+
+/// What a recording listens to (ADR-019).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CaptureSource {
+    #[default]
+    Microphone,
+    /// What the computer plays (an online class).
+    Computer,
+    /// Microphone and computer audio mixed.
+    Both,
+}
+
+impl CaptureSource {
+    pub const ALL: [CaptureSource; 3] = [CaptureSource::Microphone, CaptureSource::Computer, CaptureSource::Both];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Microphone => "Microphone",
+            Self::Computer => "Computer audio",
+            Self::Both => "Microphone + computer",
+        }
     }
 }
 
@@ -148,6 +198,8 @@ pub trait AudioCapture {
     fn level(&self) -> f32;
     fn stats(&self) -> RecorderStats;
     fn take_error(&self) -> Option<String>;
+    /// The last `ms` of 16 kHz audio (for live captions).
+    fn recent_audio(&self, ms: u64) -> Vec<f32>;
     /// Stops and saves the audio; returns the total 16 kHz samples.
     fn finish(self: Box<Self>) -> Result<u64, AudioError>;
 }
@@ -161,6 +213,10 @@ pub trait AudioPlayback {
     fn is_playing(&self) -> bool;
     fn set_playing(&self, playing: bool);
     fn seek_ms(&self, offset_ms: u64);
+    /// Playback speed in percent (50–200), keeping the pitch (ADR-017).
+    fn set_speed(&self, percent: u16);
+    /// Noise reduction / voice boost / normalise while playing (ADR-017).
+    fn set_filters(&self, settings: FilterSettings);
 }
 
 /// A snapshot of what a recorder has done so far.

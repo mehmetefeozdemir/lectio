@@ -7,10 +7,12 @@
 //! (`is_ready`, `take_error`, `take_background_error`) on later frames.
 
 mod camera;
+mod display;
 mod files;
 mod idb;
 mod player;
 mod recorder;
+mod speech;
 mod store;
 
 use std::cell::RefCell;
@@ -22,7 +24,9 @@ use lectio_core::storage::LibraryStore;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::IdbDatabase;
 
-use super::{AudioCapture, AudioError, AudioPlayback, CameraSession, FileKind, Pending, PickedFile, Platform};
+use super::{
+    AudioCapture, AudioError, AudioPlayback, CameraSession, CaptureSource, FileKind, Pending, PickedFile, Platform,
+};
 use camera::WebCamera;
 use player::WebPlayer;
 use recorder::WebRecorder;
@@ -57,8 +61,61 @@ impl Platform for WebPlatform {
         &self.store
     }
 
-    fn start_capture(&self, file_name: &str) -> Result<Box<dyn AudioCapture>, AudioError> {
-        Ok(Box::new(WebRecorder::start(self.db.clone(), file_name, self.errors.clone())))
+    fn start_capture(&self, file_name: &str, source: CaptureSource) -> Result<Box<dyn AudioCapture>, AudioError> {
+        Ok(Box::new(WebRecorder::start(self.db.clone(), file_name, source, self.errors.clone())))
+    }
+
+    fn speech(&self) -> Option<Box<dyn super::speech::SpeechService>> {
+        match speech::WebSpeech::start(self.db.clone()) {
+            Ok(service) => Some(Box::new(service)),
+            Err(e) => {
+                report(&self.errors, format!("speech-to-text could not start ({e})"));
+                None
+            }
+        }
+    }
+
+    /// Tab or screen sound needs `getDisplayMedia` (desktop browsers).
+    fn source_support(&self, source: CaptureSource) -> Result<(), &'static str> {
+        match source {
+            CaptureSource::Microphone => Ok(()),
+            _ if display::supported() => Ok(()),
+            _ => Err(display::UNSUPPORTED),
+        }
+    }
+
+    fn read_recording(&self, file_name: &str) -> Pending<Vec<u8>> {
+        let pending = Pending::waiting();
+        let (db, key, done) = (self.db.clone(), file_name.to_owned(), pending.clone());
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = idb::get(&db, idb::RECORDINGS, &key)
+                .await
+                .and_then(|value| value.map(|v| Uint8Array::new(&v).to_vec()).ok_or_else(|| "The audio is missing.".into()));
+            done.complete(result);
+        });
+        pending
+    }
+
+    fn write_recording(&self, file_name: &str, bytes: Vec<u8>) -> Result<(), String> {
+        let (db, key, errors) = (self.db.clone(), file_name.to_owned(), self.errors.clone());
+        let value = Uint8Array::from(bytes.as_slice());
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Err(e) = idb::put(&db, idb::RECORDINGS, &key, &value).await {
+                report(&errors, format!("the cleaned copy could not be stored ({e})"));
+            }
+        });
+        Ok(())
+    }
+
+    fn capture_screen(&self) -> Pending<eframe::egui::ColorImage> {
+        let pending = Pending::waiting();
+        let done = pending.clone();
+        wasm_bindgen_futures::spawn_local(async move { done.complete(display::grab_screen().await) });
+        pending
+    }
+
+    fn supports_screenshot(&self) -> bool {
+        display::supported()
     }
 
     fn open_playback(&self, file_name: &str) -> Result<Box<dyn AudioPlayback>, AudioError> {

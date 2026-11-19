@@ -3,6 +3,7 @@
 //! library or needing a microphone.
 
 use lectio_core::material::{Attachment, AttachmentKind, BlobKey, MediaKind, SlideLink};
+use lectio_core::transcript::{Segment, Transcript};
 use lectio_core::{LabelKind, Library, ModelError, Recording, SessionId};
 
 use crate::media::sketch::{SKETCH_HEIGHT, SKETCH_WIDTH, StrokePoints, rasterize_png};
@@ -42,7 +43,7 @@ fn try_sample_library() -> Result<Sample, ModelError> {
 
     let lib = lib.with_recording(
         session,
-        Recording { file_name: "sample.wav".into(), duration_ms: 50 * MINUTE_MS, sample_rate: 16_000 },
+        Recording { file_name: "sample.wav".into(), duration_ms: 50 * MINUTE_MS, sample_rate: 16_000, cleaned_file: None },
     )?;
     let slides_key = BlobKey::new_random(MediaKind::Pdf);
     let (lib, deck) = lib.with_deck(session, "Week 3 - Graphs.pdf", slides_key.clone(), 2)?;
@@ -80,9 +81,28 @@ fn try_sample_library() -> Result<Sample, ModelError> {
     };
     let (lib, sketch_note) = lib.with_attachment_note(session, 18 * MINUTE_MS, sketch, "BFS tree from the board", &[])?;
     let lib = lib.with_slide_link(session, sketch_note, Some(SlideLink { deck, page: 2 }))?;
+    let lib = lib.with_transcript(session, sample_transcript())?;
 
     let blobs = vec![(slides_key, SAMPLE_SLIDES.to_vec()), (sketch_key, sketch_png)];
     Ok(Sample { library: lib, session, blobs })
+}
+
+/// A few transcript segments around the playhead (17:40), so the Transcript
+/// tab has something to show.
+fn sample_transcript() -> Transcript {
+    let lines: [(u64, u64, &str); 8] = [
+        (16 * MINUTE_MS + 30_000, 16 * MINUTE_MS + 36_000, "So let's look at breadth-first search."),
+        (16 * MINUTE_MS + 36_000, 16 * MINUTE_MS + 44_000, "We start at one vertex and visit all of its neighbours first."),
+        (16 * MINUTE_MS + 44_000, 16 * MINUTE_MS + 53_000, "To remember who comes next, we keep a queue."),
+        (16 * MINUTE_MS + 53_000, 17 * MINUTE_MS + 4_000, "Vertices leave the queue in the order they were discovered."),
+        (17 * MINUTE_MS + 4_000, 17 * MINUTE_MS + 15_000, "That means we visit them in order of distance from the start."),
+        (17 * MINUTE_MS + 15_000, 17 * MINUTE_MS + 29_000, "This is why BFS finds shortest paths when every edge counts the same."),
+        (17 * MINUTE_MS + 29_000, 17 * MINUTE_MS + 47_000, "Let me draw the tree it builds on the board."),
+        (17 * MINUTE_MS + 47_000, 17 * MINUTE_MS + 58_000, "Each level of the tree is one more step away from the root."),
+    ];
+    let segments =
+        lines.iter().map(|&(start_ms, end_ms, text)| Segment { start_ms, end_ms, text: text.to_owned() }).collect();
+    Transcript { language: "en".into(), model: "base".into(), segments, complete: true }
 }
 
 /// A small tree (root with two children), like a BFS diagram on a board.

@@ -2,6 +2,7 @@
 
 mod player;
 mod recorder;
+mod speech;
 
 use std::path::PathBuf;
 
@@ -10,8 +11,11 @@ use lectio_core::storage::{FileBlobStore, JsonFileStore, LibraryStore};
 
 pub use player::Player;
 pub use recorder::Recorder;
+pub use speech::run_cli as transcribe_cli;
 
-use super::{AudioCapture, AudioError, AudioPlayback, FileKind, Pending, PickedFile, Platform};
+use eframe::egui;
+
+use super::{AudioCapture, AudioError, AudioPlayback, CaptureSource, FileKind, Pending, PickedFile, Platform};
 
 pub struct NativePlatform {
     store: JsonFileStore,
@@ -31,8 +35,8 @@ impl Platform for NativePlatform {
         &self.store
     }
 
-    fn start_capture(&self, file_name: &str) -> Result<Box<dyn AudioCapture>, AudioError> {
-        Ok(Box::new(Recorder::start(&self.store.audio_path(file_name))?))
+    fn start_capture(&self, file_name: &str, source: CaptureSource) -> Result<Box<dyn AudioCapture>, AudioError> {
+        Ok(Box::new(Recorder::start(&self.store.audio_path(file_name), source)?))
     }
 
     fn open_playback(&self, file_name: &str) -> Result<Box<dyn AudioPlayback>, AudioError> {
@@ -93,6 +97,62 @@ impl Platform for NativePlatform {
     fn delete_blob(&self, key: &BlobKey) -> Result<(), String> {
         self.blobs.delete(key).map_err(|e| e.to_string())
     }
+
+    fn speech(&self) -> Option<Box<dyn crate::platform::speech::SpeechService>> {
+        let dir = data_dir();
+        let store = JsonFileStore::new(&dir);
+        Some(Box::new(speech::NativeSpeech::start(models_dir(), move |name| store.audio_path(name))))
+    }
+
+    /// Computer audio is offered on every desktop; if the OS refuses (old
+    /// macOS, no permission, no monitor source) starting explains why.
+    fn source_support(&self, _source: CaptureSource) -> Result<(), &'static str> {
+        Ok(())
+    }
+
+    fn read_recording(&self, file_name: &str) -> Pending<Vec<u8>> {
+        let path = self.store.audio_path(file_name);
+        Pending::ready(std::fs::read(&path).map_err(|e| format!("Could not read {}: {e}", path.display())))
+    }
+
+    /// Written next to the original, via a temporary file and a rename, so a
+    /// crash never leaves a half-written copy under the real name.
+    fn write_recording(&self, file_name: &str, bytes: Vec<u8>) -> Result<(), String> {
+        let path = self.store.audio_path(file_name);
+        let temporary = path.with_extension("wav.part");
+        std::fs::write(&temporary, bytes).map_err(|e| format!("Could not save {}: {e}", path.display()))?;
+        std::fs::rename(&temporary, &path).map_err(|e| format!("Could not save {}: {e}", path.display()))
+    }
+
+    /// The main display, via `xcap` (macOS asks for Screen Recording
+    /// permission the first time).
+    fn capture_screen(&self) -> Pending<egui::ColorImage> {
+        Pending::ready(capture_main_screen())
+    }
+
+    fn supports_screenshot(&self) -> bool {
+        true
+    }
+}
+
+fn capture_main_screen() -> Result<egui::ColorImage, String> {
+    let monitors = xcap::Monitor::all().map_err(|e| format!("Could not see the screen: {e}"))?;
+    let monitor = monitors
+        .iter()
+        .find(|m| m.is_primary().unwrap_or(false))
+        .or_else(|| monitors.first())
+        .ok_or("No screen was found.")?;
+    let image = monitor.capture_image().map_err(|e| {
+        format!("Could not take a screenshot ({e}). On macOS, allow Screen Recording for the app you started Lectio from.")
+    })?;
+    let size = [image.width() as usize, image.height() as usize];
+    Ok(egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw()))
+}
+
+
+/// Where downloaded speech models are kept.
+pub fn models_dir() -> PathBuf {
+    data_dir().join("models")
 }
 
 fn data_dir() -> PathBuf {

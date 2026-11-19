@@ -42,6 +42,10 @@ pub struct UiState {
     pub quiet_for_s: f64,
     /// Text to put on the clipboard on the next frame ("Copy all").
     pub clipboard: Option<String>,
+    /// Phase 3: what the next recording listens to.
+    pub source: crate::platform::CaptureSource,
+    pub cleaning: Option<super::audio_actions::Cleaning>,
+    pub screenshot: Option<super::audio_actions::ScreenshotState>,
 }
 
 /// Below this level the microphone counts as "not hearing anything".

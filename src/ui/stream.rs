@@ -12,16 +12,38 @@ use lectio_core::timeline::format_offset;
 
 use super::capture::{SILENCE_HINT, SILENCE_HINT_S};
 use super::theme::{self, palette, radius, size, space};
-use super::{View, widgets};
+use super::{View, icons, widgets};
 use crate::action::Action;
 
 const SECTION_HEIGHT: f32 = 22.0;
 const TIME_WIDTH: f32 = 44.0;
 const LEVEL_HEIGHT: f32 = 8.0;
 
+/// The right panel: an Audio | Transcript tab bar, then the chosen tab.
 pub fn show(ui: &mut egui::Ui, view: &View, session: &Session, actions: &mut Vec<Action>) {
+    let transcript_tab = view.prefs.show_transcript_tab;
+    ui.horizontal(|ui| {
+        for (on, icon, name) in [(false, icons::WAVEFORM, "Audio"), (true, icons::TRANSCRIPT, "Transcript")] {
+            let selected = transcript_tab == on;
+            let color = if selected { palette(ui).accent } else { palette(ui).text_muted };
+            let text = widgets::icon_text(icon, name, theme::semibold(size::SMALL), color);
+            let tab = ui.add(egui::Button::selectable(selected, text));
+            widgets::name(&tab, Role::Tab, &format!("{name} tab in the right panel"));
+            if tab.clicked() {
+                actions.push(Action::ShowTranscript(on));
+            }
+        }
+    });
+    ui.add_space(space::XS);
+    if transcript_tab {
+        super::transcript::show(ui, view, session, actions);
+    } else {
+        audio(ui, view, session, actions);
+    }
+}
+
+fn audio(ui: &mut egui::Ui, view: &View, session: &Session, actions: &mut Vec<Action>) {
     let p = palette(ui);
-    widgets::section_label(ui, "Audio");
     let recording = view.recorder_phase == Some(RecorderPhase::Recording);
     if view.recorder_phase.is_some() {
         live_level(ui, view, recording);

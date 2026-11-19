@@ -90,6 +90,9 @@ pub struct MaterialState {
     decks: HashMap<DeckId, DeckView>,
     /// A page the session shows is still being rendered.
     pages_missing: bool,
+    /// A deck's text is still being read (keeps frames coming in the browser).
+    text_wanted: bool,
+    texts: Vec<(DeckId, Vec<String>)>,
 }
 
 impl MaterialState {
@@ -195,6 +198,23 @@ impl MaterialState {
         for link in shown.into_iter().chain(posted) {
             self.request_page(session, link, load);
         }
+        // Decks without their page text yet (imported before Phase 3, or just now).
+        self.text_wanted = false;
+        for deck in session.decks.iter().filter(|d| d.page_text.is_empty()) {
+            let view = self
+                .decks
+                .entry(deck.id)
+                .or_insert_with(|| DeckView { source: DeckSource::Loading(load(&deck.blob)), pages: HashMap::new() });
+            if let DeckSource::Ready(renderer) = &mut view.source {
+                renderer.request_text();
+            }
+            self.text_wanted = true;
+        }
+    }
+
+    /// Page text read since the last call, per deck (to store in the library).
+    pub fn take_texts(&mut self) -> Vec<(DeckId, Vec<String>)> {
+        std::mem::take(&mut self.texts)
     }
 
     fn request_page(&mut self, session: &Session, link: SlideLink, load: BlobLoader<'_>) {
@@ -262,10 +282,13 @@ impl MaterialState {
                     let texture = rendered.map(|image| ctx.load_texture(name, image, TextureOptions::LINEAR));
                     view.pages.insert(page, texture);
                 }
+                if let Some(text) = renderer.take_text() {
+                    self.texts.push((*deck, text));
+                }
                 busy |= self.viewer.deck == Some(*deck) && !view.pages.contains_key(&self.viewer.page);
             }
         }
-        busy || self.pages_missing
+        busy || self.pages_missing || self.text_wanted
     }
 
     fn update_camera(&mut self, ctx: &egui::Context) -> bool {

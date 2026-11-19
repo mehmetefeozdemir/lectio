@@ -3,6 +3,10 @@
 //! (ADR-007). This keeps drawing code free of side effects.
 
 use lectio_core::clock::RecorderCommand;
+use lectio_core::dsp::FilterSettings;
+use lectio_core::prefs::SpeechModel;
+
+use crate::platform::CaptureSource;
 use lectio_core::material::SlideLink;
 use lectio_core::{CourseId, DeckId, LabelKind, NoteId, SessionId};
 
@@ -93,4 +97,29 @@ pub enum Action {
     ExportMarkdown,
     SlideZoom(f32),
     SetFullscreen(bool),
+
+    // ---- Phase 3: text and audio (ADR-016 to ADR-019) ----
+    /// Right panel: transcript (`true`) or audio stream.
+    ShowTranscript(bool),
+    SetSpeechModel(SpeechModel),
+    /// `None` = detect the language.
+    SetLanguage(Option<String>),
+    DownloadModel,
+    Transcribe,
+    CancelTranscription,
+    ClearTranscript,
+    /// Copies transcript segment `index` into the feed as a note.
+    SegmentToFeed(usize),
+    SetCaptions(bool),
+    SearchFor(String),
+    /// Opens a search result: the session, the moment and the slide.
+    OpenHit { session: SessionId, offset_ms: Option<u64>, slide: Option<SlideLink> },
+    SetSpeed(u16),
+    SetFilters(FilterSettings),
+    SaveCleanedCopy,
+    SetPlayCleaned(bool),
+    SetSource(CaptureSource),
+    TakeScreenshot,
+    SaveScreenshot { x: f32, y: f32, w: f32, h: f32 },
+    CloseScreenshot,
 }

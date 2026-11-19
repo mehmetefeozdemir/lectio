@@ -16,7 +16,7 @@ pub fn run(seconds: u64) -> ExitCode {
     let build = if cfg!(debug_assertions) { "debug" } else { "release" };
     println!("Lectio audio self-test ({build} build): recording {seconds} s from the default microphone...");
 
-    let recorder = match Recorder::start(&path) {
+    let recorder = match Recorder::start(&path, crate::platform::CaptureSource::Microphone) {
         Ok(recorder) => recorder,
         Err(e) => {
             eprintln!("FAIL: {e}");

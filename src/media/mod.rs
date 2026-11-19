@@ -5,4 +5,5 @@
 
 pub mod images;
 pub mod sketch;
+pub mod slide_text;
 pub mod slides;

@@ -19,6 +19,7 @@ pub enum ModelError {
     InvalidBlobKey,
     UnsupportedFile,
     FileTooLarge { max_mb: u64 },
+    NoRecording,
 }
 
 impl fmt::Display for ModelError {
@@ -47,6 +48,7 @@ impl fmt::Display for ModelError {
                 write!(f, "That file type isn't supported here. Use a PDF for slides and a PNG or JPEG for photos.")
             }
             Self::FileTooLarge { max_mb } => write!(f, "That file is too large (the limit is {max_mb} MB)."),
+            Self::NoRecording => write!(f, "This session has no recording yet."),
         }
     }
 }

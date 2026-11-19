@@ -181,7 +181,7 @@ fn layout_and_theme_preferences_are_saved_with_the_library() {
 #[test]
 fn markdown_export_has_headings_slides_notes_and_labels() {
     let (lib, session, deck) = library_with_deck();
-    let recording = Recording { file_name: "a.wav".into(), duration_ms: 60_000, sample_rate: 16_000 };
+    let recording = Recording { file_name: "a.wav".into(), duration_ms: 60_000, sample_rate: 16_000, cleaned_file: None };
     let lib = lib.with_recording(session, recording).unwrap();
     let (lib, _) = lib.with_note(session, 0, "Introduction", &[LabelKind::Heading]).unwrap();
     let (lib, _) = lib.with_slide_item(session, 1_000, SlideLink { deck, page: 1 }).unwrap();
@@ -221,9 +221,3 @@ fn a_version_2_library_loads_with_defaults_for_everything_new() {
     assert_eq!(lib.preferences(), &Preferences::default());
 }
 
-#[test]
-fn version_3_is_written_and_newer_files_are_refused() {
-    assert!(Library::default().to_json().unwrap().contains("\"schema_version\": 3"));
-    let v4 = r#"{"schema_version": 4, "courses": [], "labels": {"labels": []}}"#;
-    assert!(matches!(Library::from_json(v4), Err(ModelError::UnsupportedSchema { found: 4, supported: 3 })));
-}
