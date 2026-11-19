@@ -5,6 +5,8 @@
 //! (see `lectio_core::model`), which `apply` swaps in and then saves.
 
 mod material_actions;
+mod ui_state;
+mod workflow;
 
 use std::collections::HashMap;
 
@@ -65,6 +67,8 @@ pub struct LectioApp {
     material: MaterialState,
     /// Files for the built-in sample data (no platform storage in that mode).
     sample_blobs: HashMap<BlobKey, Vec<u8>>,
+    /// Redesign (ADR-014): undo, level meter, panel and theme choices.
+    ui_state: ui_state::UiState,
     #[cfg(not(target_arch = "wasm32"))]
     screenshot: Option<crate::screenshot::ScreenshotDriver>,
 }
@@ -72,14 +76,18 @@ pub struct LectioApp {
 impl LectioApp {
     pub fn new(cc: &eframe::CreationContext<'_>, startup: Startup) -> Self {
         ui::theme::install(&cc.egui_ctx);
-        match startup {
+        let mut app = match startup {
             Startup::Sample => Self::with_sample_data(),
             Startup::Saved(Ok(platform)) => Self::with_saved_data(platform),
             Startup::Saved(Err(problem)) => Self {
                 banner: Some(Banner::error(format!("{problem} Changes in this window will not be saved."))),
                 ..Self::empty(Library::default(), None)
             },
-        }
+        };
+        app.purge_expired_trash();
+        // The saved theme choice (preferences are part of the library).
+        cc.egui_ctx.set_theme(workflow::theme_from(app.library.preferences().theme));
+        app
     }
 
     /// `--screenshot`: draw, capture the window to `path`, exit.
@@ -102,6 +110,7 @@ impl LectioApp {
             banner: None,
             material: MaterialState::default(),
             sample_blobs: HashMap::new(),
+            ui_state: ui_state::UiState::default(),
             #[cfg(not(target_arch = "wasm32"))]
             screenshot: None,
         }
@@ -201,6 +210,16 @@ impl LectioApp {
             material: &self.material,
             camera_available: self.platform.as_ref().is_some_and(|p| p.supports_camera()),
             can_import: self.platform.is_some() && self.can_save,
+            undo_message: self.ui_state.undo.as_ref().map(|u| u.message),
+            levels: self.ui_state.levels.iter().copied().collect(),
+            sidebar: self.ui_state.sidebar,
+            theme: self.ui_state.theme.unwrap_or(egui::ThemePreference::System),
+            screen: self.ui_state.screen,
+            narrow_tab: self.ui_state.narrow_tab,
+            slide_zoom: self.ui_state.slide_zoom.max(1.0),
+            fullscreen: self.ui_state.fullscreen,
+            quiet_for_s: self.ui_state.quiet_for_s,
+            prefs: self.library.preferences(),
         }
     }
 
@@ -212,6 +231,7 @@ impl LectioApp {
             self.material.open_session(session);
         }
         self.selected = Some(id);
+        self.ui_state.screen = crate::action::Screen::Workspace;
         self.draft = NoteDraft::default();
         match &session.recording {
             None => {
@@ -254,12 +274,15 @@ impl LectioApp {
         }
         if self.library != before {
             self.persist();
-            self.delete_orphaned_blobs(&before);
+            if self.ui_state.undo.is_none() {
+                self.delete_orphaned_blobs(&before);
+            }
         }
+        self.end_undo_if_library_moved_on();
     }
 
     /// After a delete, files no note or deck refers to any more are removed
-    /// (ADR-011). Runs after saving, so a crash can't leave a note pointing
+    /// (ADR-012). Runs after saving, so a crash can't leave a note pointing
     /// at a deleted file.
     fn delete_orphaned_blobs(&mut self, before: &Library) {
         for key in orphaned_blobs(before, &self.library) {
@@ -286,7 +309,7 @@ impl LectioApp {
             Action::ToggleLabel(note, kind) => {
                 self.change_session(|lib, s| lib.with_label_toggled(s, note, kind));
             }
-            Action::DeleteNote(note) => self.change_session(|lib, s| lib.without_note(s, note)),
+            Action::DeleteNote(note) => self.delete_note_with_undo(note),
             Action::TogglePlay => self.toggle_play(),
             Action::Seek(offset) => self.seek(offset),
             Action::PlayFrom(offset) => {
@@ -301,7 +324,7 @@ impl LectioApp {
             Action::SaveLabels(names) => self.rename_labels(&names),
             Action::CloseLabelEditor => self.buffers.label_names = None,
             Action::DismissBanner => self.banner = None,
-            material => self.apply_material(material),
+            other => self.apply_ui(other),
         }
     }
 
@@ -421,6 +444,7 @@ impl LectioApp {
             Ok(recorder) => {
                 capture.recorder = Some(recorder);
                 capture.clock = next_clock;
+                self.after_recording_started();
             }
             Err(e) => self.banner = Some(Banner::error(format!("{e}. {}", platform.mic_help()))),
         }
@@ -516,6 +540,7 @@ impl LectioApp {
         }
         self.collect_background_errors();
         let material_busy = self.tick_material(ctx);
+        self.tick_ui_state(ctx.input(|i| i.time));
         let loading = self.playback.as_ref().and_then(|p| p.player.as_ref()).is_some_and(|p| !p.is_ready());
         if self.is_recording_active() || self.view().playing || loading || material_busy {
             ctx.request_repaint_after(LIVE_REDRAW);
@@ -533,13 +558,24 @@ impl eframe::App for LectioApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        ui::widgets::clear_named_widgets(ui.ctx());
+        self.ui_state.theme = Some(ui.ctx().options(|o| o.theme_preference));
         let mut actions = ui::shortcuts(ui.ctx(), &self.view());
         // The view borrows all of `self` read-only, so the text buffers are
-        // moved out for the frame and put back after (see PROBLEMS P-002).
+        // moved out for the frame and put back after (see PROBLEMS P-003).
         let mut buffers = std::mem::take(&mut self.buffers);
         ui::draw(ui, &self.view(), &mut buffers, self.banner.as_ref(), &mut actions);
         self.buffers = buffers;
         self.apply_all(actions);
+        if let Some(theme) = self.ui_state.theme_request.take() {
+            ui.ctx().set_theme(theme);
+        }
+        if let Some(text) = self.ui_state.clipboard.take() {
+            ui.ctx().copy_text(text);
+            self.banner = Some(Banner::warning("Copied the session as Markdown.".into()));
+        }
+        #[cfg(target_arch = "wasm32")]
+        crate::entry_web::publish_named_widgets(ui.ctx());
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(driver) = &mut self.screenshot {
             driver.on_frame(ui.ctx());

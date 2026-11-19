@@ -1,5 +1,5 @@
 //! The browser: IndexedDB storage, `getUserMedia` + `AudioWorklet`
-//! recording, Web Audio playback (ADR-009).
+//! recording, Web Audio playback (ADR-010).
 //!
 //! Browser APIs are asynchronous (they return Promises). The app's traits are
 //! synchronous because egui redraws every frame, so the web side starts the
@@ -74,7 +74,7 @@ impl Platform for WebPlatform {
         files::pick(kind)
     }
 
-    /// Queued like library saves; the IndexedDB `blobs` table (ADR-011).
+    /// Queued like library saves; the IndexedDB `blobs` table (ADR-012).
     fn put_blob(&self, key: &BlobKey, bytes: Vec<u8>) -> Result<(), String> {
         let (db, key, errors) = (self.db.clone(), key.as_str().to_owned(), self.errors.clone());
         let value = Uint8Array::from(bytes.as_slice());
@@ -98,6 +98,33 @@ impl Platform for WebPlatform {
             done.complete(result);
         });
         pending
+    }
+
+    fn delete_recording(&self, file_name: &str) -> Result<(), String> {
+        let (db, key, errors) = (self.db.clone(), file_name.to_owned(), self.errors.clone());
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Err(e) = idb::delete(&db, idb::RECORDINGS, &key).await {
+                report(&errors, format!("an old recording could not be removed ({e})"));
+            }
+        });
+        Ok(())
+    }
+
+    /// Offers the text as a download: a temporary `blob:` URL on an `<a download>`.
+    fn save_text_file(&self, suggested_name: &str, text: &str) -> Result<bool, String> {
+        let document = web_sys::window().and_then(|w| w.document()).ok_or("no document")?;
+        let parts = js_sys::Array::of1(&JsValue::from_str(text));
+        let options = web_sys::BlobPropertyBag::new();
+        options.set_type("text/markdown");
+        let blob = web_sys::Blob::new_with_str_sequence_and_options(&parts, &options).map_err(js_err)?;
+        let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(js_err)?;
+        let link: web_sys::HtmlAnchorElement =
+            document.create_element("a").map_err(js_err)?.dyn_into().map_err(|_| "no <a> element")?;
+        link.set_href(&url);
+        link.set_download(suggested_name);
+        link.click();
+        let _ = web_sys::Url::revoke_object_url(&url);
+        Ok(true)
     }
 
     fn delete_blob(&self, key: &BlobKey) -> Result<(), String> {

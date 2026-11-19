@@ -1,4 +1,4 @@
-//! Picking a file in the browser (ADR-012). `rfd` shows an
+//! Picking a file in the browser (ADR-013). `rfd` shows an
 //! `<input type="file">`; reading the chosen file is asynchronous, so the
 //! result arrives in a `Pending` on a later frame.
 //!

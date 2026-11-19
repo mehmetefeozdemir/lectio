@@ -1,5 +1,5 @@
 //! The sketch window: draw with a mouse, trackpad or pen; save as an image
-//! note (ADR-012). Strokes are kept in canvas pixels (960×600), so the saved
+//! note (ADR-013). Strokes are kept in canvas pixels (960×600), so the saved
 //! PNG doesn't depend on how big the window happens to be.
 
 use eframe::egui::{self, Color32, Pos2, Sense, Stroke};
@@ -35,7 +35,7 @@ pub fn window(ctx: &egui::Context, buffers: &mut Buffers, actions: &mut Vec<Acti
     let Some(pad) = &mut buffers.sketch else { return };
     let mut open = true;
     // The canvas width comes from the screen, not from the window: a new
-    // egui window starts narrow and would shrink the canvas to a stamp (P-015).
+    // egui window starts narrow and would shrink the canvas to a stamp (P-016).
     let display_width = (ctx.content_rect().width() - WINDOW_MARGIN).clamp(MIN_DISPLAY_WIDTH, MAX_DISPLAY_WIDTH);
     egui::Window::new("Sketch")
         .collapsible(false)
@@ -50,7 +50,8 @@ pub fn window(ctx: &egui::Context, buffers: &mut Buffers, actions: &mut Vec<Acti
         canvas(ui, pad, display_width);
         ui.horizontal(|ui| {
             ui.label("Caption");
-            ui.add(egui::TextEdit::singleline(&mut pad.caption).hint_text("optional").desired_width(320.0));
+            let caption = ui.add(egui::TextEdit::singleline(&mut pad.caption).hint_text("optional").desired_width(320.0));
+            super::widgets::name(&caption, egui::Role::TextInput, "Sketch caption");
         });
         ui.horizontal(|ui| {
             if ui.add_enabled(!pad.strokes.is_empty(), egui::Button::new("Undo")).clicked() {
@@ -59,8 +60,7 @@ pub fn window(ctx: &egui::Context, buffers: &mut Buffers, actions: &mut Vec<Acti
             if ui.add_enabled(!pad.strokes.is_empty(), egui::Button::new("Clear")).clicked() {
                 pad.strokes.clear();
             }
-            let save = egui::Button::new("Save sketch");
-            if ui.add_enabled(!is_blank(&pad.strokes), save).clicked() {
+            if super::widgets::primary_button(ui, super::icons::SKETCH, "Save sketch", !is_blank(&pad.strokes)).clicked() {
                 actions.push(Action::SaveSketch {
                     strokes: pad.strokes.clone(),
                     caption: pad.caption.clone(),
@@ -116,4 +116,5 @@ fn canvas(ui: &mut egui::Ui, pad: &mut SketchPad, display_width: f32) {
         }
     }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::accesskit::Role::Canvas, true, "Sketch canvas"));
+    super::widgets::name(&response, egui::Role::Canvas, "Sketch canvas");
 }

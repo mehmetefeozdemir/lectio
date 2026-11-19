@@ -2,7 +2,7 @@
 //!
 //! The whole file is loaded into memory as 16-bit samples (16 kHz mono is
 //! about 115 MB for 1 hour). The output callback reads from a shared
-//! position, so seeking is just "set the position" (ADR-005).
+//! position, so seeking is just "set the position" (ADR-006).
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};

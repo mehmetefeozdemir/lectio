@@ -2,23 +2,27 @@
 //!
 //! Everything here is plain data plus pure functions, so it can be tested with
 //! `cargo test` and reused unchanged by a future web (WASM) or mobile shell.
-//! See `docs/DECISIONS.md` ADR-002 and ADR-005.
+//! See `docs/DECISIONS.md` ADR-003 and ADR-006.
 
 pub mod clock;
 mod error;
 mod ids;
 mod labels;
+pub mod export;
 pub mod material;
 mod model;
+pub mod prefs;
 pub mod realtime;
 pub mod resample;
 pub mod storage;
+pub mod stream;
 pub mod timeline;
+pub mod trash;
 
 pub use error::ModelError;
 pub use ids::{CourseId, DeckId, NoteId, SessionId};
 pub use labels::{Label, LabelKind, LabelSet};
-pub use model::{Course, Library, Note, Recording, SCHEMA_VERSION, Session};
+pub use model::{Course, Library, Note, NoteKind, Recording, SCHEMA_VERSION, Session};
 
 /// Longest course, session or label name we accept (in characters).
 pub const MAX_NAME_CHARS: usize = 80;

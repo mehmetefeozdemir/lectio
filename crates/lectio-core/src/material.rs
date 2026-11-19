@@ -1,5 +1,5 @@
 //! Phase 2 "material": PDF slide decks, links from notes to slide pages, and
-//! photo/sketch notes (ADR-011).
+//! photo/sketch notes (ADR-012).
 //!
 //! The library only stores *references* to big files: a `BlobKey` like
 //! `3f2a…-….pdf`. The bytes live in a separate blob store (files on native,
@@ -161,6 +161,11 @@ pub struct Attachment {
     pub height: u32,
 }
 
+/// The default title of a slide item.
+pub fn slide_title(page: u32) -> String {
+    format!("Slide {page}")
+}
+
 /// A readable deck title from a file name: `Week 3.pdf` → `Week 3`.
 pub fn deck_title(file_name: &str) -> String {
     let trimmed = file_name.trim();
@@ -253,6 +258,30 @@ impl Library {
             }
         }
         self.map_note(session, note, |n| Ok(crate::Note { slide: link, ..n.clone() }))
+    }
+
+    /// Posts a slide to the feed at `offset_ms` (a slide item, titled
+    /// "Slide N" until the user renames it).
+    pub fn with_slide_item(&self, session: SessionId, offset_ms: u64, link: SlideLink) -> Result<(Library, NoteId), ModelError> {
+        let mut item = new_note(offset_ms, &slide_title(link.page), &[], None);
+        item.kind = crate::NoteKind::Slide;
+        let (library, id) = self.insert_note(session, item)?;
+        // Validates the page and deck the same way as any other link.
+        Ok((library.with_slide_link(session, id, Some(link))?, id))
+    }
+
+    /// Edits a note's text (a slide item's title). A slide item with an empty
+    /// title goes back to "Slide N"; a text note can't become empty.
+    pub fn with_note_text(&self, session: SessionId, note: NoteId, text: &str) -> Result<Library, ModelError> {
+        self.map_note(session, note, |n| {
+            let trimmed = text.trim();
+            let body = match (n.kind, n.slide) {
+                (crate::NoteKind::Slide, Some(link)) if trimmed.is_empty() => slide_title(link.page),
+                _ => trimmed.to_owned(),
+            };
+            let changed = crate::Note { body, ..n.clone() };
+            if changed.has_content() { Ok(changed) } else { Err(ModelError::EmptyNote) }
+        })
     }
 
     /// Adds a photo or sketch note at `offset_ms`, with an optional caption.

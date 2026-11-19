@@ -11,7 +11,7 @@ serde_json = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # In the browser there is no OS random-number source, so uuid's v4 ids get
-# their randomness from `crypto.getRandomValues` via the `js` feature (P-007).
+# their randomness from `crypto.getRandomValues` via the `js` feature (P-008).
 # The code stays the same on every platform.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 uuid = { version = "1", features = ["v4", "serde", "js"] }

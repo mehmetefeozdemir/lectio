@@ -1,7 +1,7 @@
 //! Browser recording: `getUserMedia` (microphone permission) → an
 //! `AudioWorklet` that runs on the browser's audio thread and posts batches
 //! of mono samples → this code, which converts them to 16 kHz with the same
-//! `SpeechConverter` the native writer thread uses (ADR-008, ADR-009).
+//! `SpeechConverter` the native writer thread uses (ADR-009, ADR-010).
 //!
 //! The worklet is `web/lectio-capture-worklet.js`, copied next to the page
 //! by trunk. When recording stops, the samples are encoded as WAV and stored
@@ -59,6 +59,8 @@ struct Shared {
     frames_captured: Cell<u64>,
     batches: Cell<u64>,
     peak: Cell<f32>,
+    /// Loudest sample of the latest batch (for the level meter).
+    level: Cell<f32>,
     error: RefCell<Option<String>>,
     graph: RefCell<Option<Graph>>,
 }
@@ -76,8 +78,9 @@ impl Shared {
         let mut out = self.scratch.borrow_mut();
         out.clear();
         self.converter.set(Some(converter.process(&input, &mut out)));
-        let peak = out.iter().fold(self.peak.get(), |p, s| p.max(s.abs()));
-        self.peak.set(peak);
+        let batch_peak = out.iter().fold(0.0f32, |p, s| p.max(s.abs()));
+        self.level.set(batch_peak);
+        self.peak.set(self.peak.get().max(batch_peak));
         self.samples.borrow_mut().extend(out.iter().map(|&s| to_i16(s)));
         self.frames_captured.set(self.frames_captured.get() + input.len() as u64);
         self.batches.set(self.batches.get() + 1);
@@ -169,6 +172,10 @@ impl AudioCapture for WebRecorder {
 
     fn samples_written(&self) -> u64 {
         self.shared.samples.borrow().len() as u64
+    }
+
+    fn level(&self) -> f32 {
+        self.shared.level.get()
     }
 
     fn stats(&self) -> RecorderStats {

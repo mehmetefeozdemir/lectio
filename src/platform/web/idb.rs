@@ -7,7 +7,7 @@
 //! Layout: database `lectio`, version 2, three object stores (tables):
 //! `library` (key `library.json` → the JSON text),
 //! `recordings` (key `<session-id>.wav` → the WAV bytes) and, since version 2
-//! (Phase 2, ADR-011), `blobs` (key `<uuid>.pdf|png|jpg` → the file's bytes).
+//! (Phase 2, ADR-012), `blobs` (key `<uuid>.pdf|png|jpg` → the file's bytes).
 //! Opening with a higher version makes the browser run `onupgradeneeded`,
 //! which adds any missing table; a Phase 1 database keeps its data.
 

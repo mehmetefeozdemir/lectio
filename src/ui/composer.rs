@@ -1,62 +1,102 @@
-//! The note box: type a note, press Enter to save it at the moment you
-//! started typing (see `NoteDraft` in lectio-core).
+//! The note input of the input bar: one text field, attach icons for photo,
+//! camera (where available) and sketch, the five labels as compact coloured
+//! chips (shortcut in the tooltip), and "Post next slide". A note is stamped with the
+//! moment the user started typing (`NoteDraft` in lectio-core).
 
-use eframe::egui;
+use eframe::egui::{self, CornerRadius, Key, Modifiers, Role};
+use lectio_core::LabelKind;
 use lectio_core::timeline::format_offset;
 
-use super::{View, labels};
+use super::theme::{self, palette, radius, size, space};
+use super::home::LABEL_ORDER;
+use super::{LABEL_KEYS, POST_SLIDE, View, icons, shortcut_hint, widgets};
 use crate::action::Action;
+
+/// Room right of the text field for the attach icons and the send button.
+const ATTACH_WIDTH: f32 = 4.0 * 36.0 + 40.0;
 
 pub fn show(ui: &mut egui::Ui, view: &View, actions: &mut Vec<Action>) {
     let enabled = view.can_take_notes;
-    let mut text = view.draft.text().to_owned();
-    let anchor = view.draft.anchor_ms(view.offset_ms);
-    let hint = if enabled {
-        "Type a note and press Enter. It is stamped with the moment you started typing."
-    } else {
-        "Start recording to take notes."
-    };
+    input_row(ui, view, enabled, actions);
+    ui.horizontal_wrapped(|ui| {
+        label_chips(ui, view, enabled, actions);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| post_slide_button(ui, view, actions));
+    });
+}
 
+/// Adds the next slide to the feed at the current time.
+fn post_slide_button(ui: &mut egui::Ui, view: &View, actions: &mut Vec<Action>) {
+    let p = palette(ui);
+    let enabled = view.can_take_notes && view.material.viewer.deck.is_some();
+    let hint = shortcut_hint(ui.ctx(), POST_SLIDE.0, POST_SLIDE.1);
+    let text = widgets::icon_text(icons::SLIDES, "Post next slide", theme::semibold(size::SMALL), p.accent);
+    let button = ui.add_enabled(enabled, egui::Button::new(text).small());
+    widgets::name(&button, Role::Button, "Post next slide");
+    let why = if view.material.viewer.deck.is_none() { "Import slides first. " } else { "" };
+    if button.on_hover_text(format!("{why}Turn to the next slide and add it to the feed now ({hint})")).clicked() {
+        actions.push(Action::PostSlide { next: true });
+    }
+}
+
+fn input_row(ui: &mut egui::Ui, view: &View, enabled: bool, actions: &mut Vec<Action>) {
+    let mut text = view.draft.text().to_owned();
+    let anchor = format_offset(view.draft.anchor_ms(view.offset_ms));
+    let hint = if enabled { "Write a note…  (Enter to save)" } else { "Start recording to take notes" };
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(format_offset(anchor)).monospace().strong())
-            .on_hover_text("The time this note will be saved at");
-        let field = ui.add_enabled(
-            enabled,
-            egui::TextEdit::singleline(&mut text).hint_text(hint).desired_width(ui.available_width() - 110.0),
-        );
+        widgets::time_pill(ui, &anchor, false, "Time the note will be saved at").on_hover_text("The time this note will be saved at");
+        let width = ui.available_width() - ATTACH_WIDTH;
+        let field = ui.add_enabled(enabled, egui::TextEdit::singleline(&mut text).hint_text(hint).desired_width(width));
+        widgets::name(&field, Role::TextInput, "Note text");
         if field.changed() {
             actions.push(Action::DraftChanged(text.clone()));
         }
-        let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let entered = field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
         let can_save = enabled && !text.trim().is_empty();
-        if ui.add_enabled(can_save, egui::Button::new("Save note")).clicked() || (entered && can_save) {
+        attach_icons(ui, view, actions);
+        let send = widgets::icon_button_sized(ui, icons::SEND, "Save note (Enter)", can_save, size::ICON_LARGE);
+        if send.clicked() || (entered && can_save) {
             actions.push(Action::SubmitNote);
             field.request_focus();
         }
     });
-    labels::moment_buttons(ui, view.library.labels(), enabled, actions);
-    material_buttons(ui, view, actions);
 }
 
-/// Phase 2: add a photo (file, or camera where available) or a sketch at
-/// the current moment.
-fn material_buttons(ui: &mut egui::Ui, view: &View, actions: &mut Vec<Action>) {
+/// One-tap labels: icon + name on the label's soft colour. Heading needs
+/// text (it turns the typed note into a section title).
+fn label_chips(ui: &mut egui::Ui, view: &View, enabled: bool, actions: &mut Vec<Action>) {
+    let dark = ui.visuals().dark_mode;
+    ui.spacing_mut().item_spacing.x = space::XS + 2.0;
+    let has_text = !view.draft.text().trim().is_empty();
+    for kind in LABEL_ORDER {
+        let colors = theme::label_colors(kind, dark);
+        let name = view.library.labels().name(kind);
+        let text = widgets::icon_text(icons::label(kind), name, theme::regular(size::SMALL), colors.text);
+        let button = egui::Button::new(text).fill(colors.fill).corner_radius(CornerRadius::same(radius::CONTROL)).small();
+        let key = LabelKind::ALL.iter().position(|k| *k == kind).map(|i| LABEL_KEYS[i]).unwrap_or(Key::Num1);
+        let hint = shortcut_hint(ui.ctx(), Modifiers::COMMAND, key);
+        let is_heading = kind == LabelKind::Heading;
+        let tip = if is_heading {
+            format!("Save the typed text as a section heading ({hint})")
+        } else {
+            format!("Mark this moment as {name} ({hint}). If you are typing a note, it is saved with this label.")
+        };
+        let response = ui.add_enabled(enabled && (has_text || !is_heading), button).on_hover_text(tip);
+        widgets::name(&response, Role::Button, &format!("Label this moment: {name}"));
+        if response.clicked() {
+            actions.push(Action::LabelMoment(kind));
+        }
+    }
+}
+
+fn attach_icons(ui: &mut egui::Ui, view: &View, actions: &mut Vec<Action>) {
     let enabled = view.can_take_notes && view.can_import;
-    ui.horizontal_wrapped(|ui| {
-        ui.label("Add to the timeline:");
-        let photo = ui.add_enabled(enabled, egui::Button::new("Photo from file…"));
-        if photo.on_hover_text("Pick a photo (PNG or JPEG), e.g. of the board").clicked() {
-            actions.push(Action::AddPhotoFromFile);
-        }
-        if view.camera_available {
-            let camera = ui.add_enabled(enabled, egui::Button::new("Take photo…"));
-            if camera.on_hover_text("Use this device's camera").clicked() {
-                actions.push(Action::OpenCamera);
-            }
-        }
-        let sketch = ui.add_enabled(enabled, egui::Button::new("Sketch…"));
-        if sketch.on_hover_text("Draw a quick diagram; it is saved as an image").clicked() {
-            actions.push(Action::OpenSketch);
-        }
-    });
+    if widgets::icon_button(ui, icons::IMAGE, "Add a photo from a file", enabled).clicked() {
+        actions.push(Action::AddPhotoFromFile);
+    }
+    if view.camera_available && widgets::icon_button(ui, icons::CAMERA, "Take a photo with the camera", enabled).clicked() {
+        actions.push(Action::OpenCamera);
+    }
+    if widgets::icon_button(ui, icons::SKETCH, "Add a sketch", enabled).clicked() {
+        actions.push(Action::OpenSketch);
+    }
 }

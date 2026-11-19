@@ -8,14 +8,14 @@ description = "Lectio: lecture notes timestamped to the audio (Phases 1-2: Captu
 [workspace]
 members = ["crates/lectio-core"]
 
-# ---- every target: Windows, macOS, Linux and the web (ADR-009) ----
+# ---- every target: Windows, macOS, Linux and the web (ADR-010) ----
 [dependencies]
 lectio-core = { path = "crates/lectio-core" }
 # Default features: wgpu renderer (WebGPU, with a WebGL fallback in browsers)
 # and AccessKit for screen readers on desktop.
 eframe = "0.37"
 hound = "3.5"
-# Phase 2 (ADR-010, ADR-012): PDF slides, photos, sketches, file picking.
+# Phase 2 (ADR-011, ADR-013): PDF slides, photos, sketches, file picking.
 hayro = "0.9"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 tiny-skia = "0.12"
@@ -70,10 +70,15 @@ web-sys = { version = "0.3", features = [
     "IdbTransactionMode",
     "DomException",
     "DomStringList",
-    # Phase 2: browser camera (ADR-012)
+    # Phase 2: browser camera (ADR-013)
     "HtmlVideoElement",
     "HtmlMediaElement",
     "CanvasRenderingContext2d",
     "ImageData",
+    # Markdown export download (ADR-015)
+    "Blob",
+    "BlobPropertyBag",
+    "Url",
+    "HtmlAnchorElement",
     "Event",
 ] }

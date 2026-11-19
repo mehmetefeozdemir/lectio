@@ -36,7 +36,7 @@ pub fn decode_for_display(bytes: &[u8], max_side: u32) -> Result<ColorImage, Str
 
 /// JPEG for a camera snapshot (RGBA in, alpha dropped). Quality 85 keeps
 /// board text sharp at about a tenth of the PNG size. Only the browser has
-/// a camera (ADR-012); it is unit-tested on every target.
+/// a camera (ADR-013); it is unit-tested on every target.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub fn encode_jpeg(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
     const QUALITY: u8 = 85;

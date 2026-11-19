@@ -32,10 +32,7 @@ impl LectioApp {
             Action::GoToSlide(link) => self.material.show_deck(link.deck, link.page),
             Action::SetLinkNewNotes(on) => self.material.viewer.link_new_notes = on,
             Action::LinkNote(note, link) => self.change_session(|lib, s| lib.with_slide_link(s, note, link)),
-            Action::RemoveDeck(deck) => {
-                self.change_session(|lib, s| lib.without_deck(s, deck));
-                self.material.forget_deck(deck);
-            }
+            Action::RemoveDeck(deck) => self.remove_deck_with_undo(deck),
             Action::OpenCamera => self.open_camera(),
             Action::TakePhoto => self.take_photo(),
             Action::CloseCamera => self.material.camera = None,
@@ -169,7 +166,7 @@ impl LectioApp {
     }
 
     /// Stores the image as a blob first, then adds the note that refers to it,
-    /// so a note never points at a file that doesn't exist (ADR-011).
+    /// so a note never points at a file that doesn't exist (ADR-012).
     fn add_image_note(
         &mut self,
         session: SessionId,

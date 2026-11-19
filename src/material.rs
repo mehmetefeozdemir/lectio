@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use eframe::egui::{self, TextureHandle, TextureOptions};
 use lectio_core::material::{BlobKey, SlideLink};
-use lectio_core::{DeckId, Session, SessionId};
+use lectio_core::{DeckId, NoteKind, Session, SessionId};
 
 use crate::media::images::decode_for_display;
 use crate::media::slides::DeckRenderer;
@@ -88,6 +88,8 @@ pub struct MaterialState {
     pub camera: Option<CameraState>,
     images: HashMap<BlobKey, ImageState>,
     decks: HashMap<DeckId, DeckView>,
+    /// A page the session shows is still being rendered.
+    pages_missing: bool,
 }
 
 impl MaterialState {
@@ -179,22 +181,33 @@ impl MaterialState {
     }
 
     /// Starts loading whatever the open session needs to show: its note
-    /// images and the shown slide page.
+    /// images, the shown slide page, and the pages that slide items in the
+    /// feed show as thumbnails.
     pub fn ensure_loaded(&mut self, session: &Session, load: BlobLoader<'_>) {
         for attachment in session.notes.iter().filter_map(|n| n.attachment.as_ref()) {
             self.images
                 .entry(attachment.blob.clone())
                 .or_insert_with(|| ImageState::Loading(load(&attachment.blob)));
         }
-        let Some(deck) = self.viewer.deck.and_then(|d| session.decks.iter().find(|x| x.id == d)) else { return };
+        let shown = self.shown_slide(session);
+        let posted = session.notes.iter().filter(|n| n.kind == NoteKind::Slide).filter_map(|n| n.slide);
+        self.pages_missing = false;
+        for link in shown.into_iter().chain(posted) {
+            self.request_page(session, link, load);
+        }
+    }
+
+    fn request_page(&mut self, session: &Session, link: SlideLink, load: BlobLoader<'_>) {
+        let Some(deck) = session.decks.iter().find(|x| x.id == link.deck) else { return };
         let view = self
             .decks
             .entry(deck.id)
             .or_insert_with(|| DeckView { source: DeckSource::Loading(load(&deck.blob)), pages: HashMap::new() });
         if let DeckSource::Ready(renderer) = &mut view.source
-            && !view.pages.contains_key(&self.viewer.page)
+            && !view.pages.contains_key(&link.page)
         {
-            renderer.request(self.viewer.page);
+            renderer.request(link.page);
+            self.pages_missing = true;
         }
     }
 
@@ -252,7 +265,7 @@ impl MaterialState {
                 busy |= self.viewer.deck == Some(*deck) && !view.pages.contains_key(&self.viewer.page);
             }
         }
-        busy
+        busy || self.pages_missing
     }
 
     fn update_camera(&mut self, ctx: &egui::Context) -> bool {

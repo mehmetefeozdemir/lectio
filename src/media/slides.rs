@@ -1,4 +1,4 @@
-//! PDF slides with `hayro` (ADR-010): count pages at import, render pages to
+//! PDF slides with `hayro` (ADR-011): count pages at import, render pages to
 //! images for display.
 //!
 //! Rendering can take a while for big decks, so `DeckRenderer` keeps it off
@@ -33,7 +33,7 @@ pub fn page_count(bytes: &[u8]) -> Result<u32, String> {
 }
 
 /// `RenderCache<'a>` borrows from the parsed PDF (`'a`), so the cache can't
-/// outlive it or be stored next to it in one struct (P-013).
+/// outlive it or be stored next to it in one struct (P-014).
 fn render_page<'a>(pdf: &'a Pdf, cache: &RenderCache<'a>, page: u32) -> Result<ColorImage, String> {
     let pages = pdf.pages();
     let index = page.checked_sub(1).ok_or("pages start at 1")? as usize;
@@ -109,7 +109,7 @@ mod web {
     /// Renders on the main thread, one queued page per `poll` (per frame),
     /// so the page stays responsive between pages. The render cache borrows
     /// the PDF, so it can't live in this struct; each page gets a fresh one
-    /// (pages are cached as textures by the app anyway; P-013).
+    /// (pages are cached as textures by the app anyway; P-014).
     pub struct DeckRenderer {
         pdf: Result<Pdf, String>,
         queue: VecDeque<u32>,

@@ -1,58 +1,98 @@
-//! Playback view: the audio timeline with note markers, and the notes.
+//! The session title line in the workspace toolbar (inline rename), and the
+//! player row of the input bar (round play/pause, ±5 s, time, timeline).
 
-use eframe::egui::{self, Key, Modifiers};
+use eframe::egui::{self, Key, Modifiers, RichText, Sense, Stroke, Role};
 use lectio_core::Session;
 use lectio_core::timeline::format_offset;
 
-use super::{SEEK_STEP_MS, View, composer, notes, shortcut_hint, timeline};
+use super::theme::{self, palette, size};
+use super::{Buffers, SEEK_STEP_MS, View, format, icons, shortcut_hint, timeline, widgets};
 use crate::action::Action;
 
-/// Course name and session title above either view.
-pub fn title(ui: &mut egui::Ui, view: &View, session: &Session) {
-    let course = view.library.course_of(session.id).map(|c| c.name.as_str()).unwrap_or("");
-    ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(course).weak());
-        ui.label(egui::RichText::new("›").weak());
-        ui.heading(&session.title);
-    });
-    ui.add_space(4.0);
+const BIG_BUTTON: f32 = 40.0;
+/// The course/date line only shows when the toolbar has room for it.
+const DETAILS_MIN_WIDTH: f32 = 520.0;
+
+/// One line in the toolbar: the title (click or the pencil to rename), then
+/// course, date and length.
+pub fn header(ui: &mut egui::Ui, view: &View, session: &Session, buffers: &mut Buffers, actions: &mut Vec<Action>) {
+    let p = palette(ui);
+    let editing = buffers.title_edit.as_ref().is_some_and(|(id, _)| *id == session.id);
+    if editing {
+        return title_editor(ui, session, buffers, actions);
+    }
+    let title = ui.add(
+        egui::Label::new(RichText::new(&session.title).font(theme::semibold(size::TITLE)).color(p.text))
+            .truncate()
+            .sense(Sense::click()),
+    );
+    let pencil = widgets::icon_button(ui, icons::EDIT, "Rename session", !view.busy_recording);
+    if title.on_hover_text("Click to rename").clicked() || pencil.clicked() {
+        buffers.title_edit = Some((session.id, session.title.clone()));
+    }
+    if ui.available_width() > DETAILS_MIN_WIDTH {
+        let course = view.library.course_of(session.id).map(|c| c.name.as_str()).unwrap_or("");
+        let details = format!("{course} · {}", format::session_details(session));
+        ui.label(RichText::new(details).size(size::CAPTION).color(p.text_muted));
+    }
 }
 
-pub fn show(ui: &mut egui::Ui, view: &View, session: &Session, actions: &mut Vec<Action>) {
-    title(ui, view, session);
+fn title_editor(ui: &mut egui::Ui, session: &Session, buffers: &mut Buffers, actions: &mut Vec<Action>) {
+    let Some((_, text)) = &mut buffers.title_edit else { return };
+    let field = ui.add(egui::TextEdit::singleline(text).font(theme::semibold(size::TITLE)).desired_width(ui.available_width().min(420.0)));
+    widgets::name(&field, Role::TextInput, "Session title");
+    if !field.has_focus() && !field.lost_focus() {
+        field.request_focus();
+    }
+    let cancelled = ui.input(|i| i.key_pressed(Key::Escape));
+    if cancelled {
+        buffers.title_edit = None;
+    } else if field.lost_focus() {
+        actions.push(Action::RenameSession(session.id, text.clone()));
+        buffers.title_edit = None;
+    }
+}
+
+/// The player: round play/pause, ±5 s, the time, and the timeline.
+pub fn bar(ui: &mut egui::Ui, view: &View, session: &Session, actions: &mut Vec<Action>) {
     let duration = view.duration_ms.unwrap_or(0);
-    egui::Frame::group(ui.style()).inner_margin(12.0).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        transport(ui, view, duration, actions);
+    ui.horizontal(|ui| {
+        play_button(ui, view, actions);
+        let back = format!("Back 5 s ({})", shortcut_hint(ui.ctx(), Modifiers::COMMAND, Key::OpenBracket));
+        if widgets::icon_button_sized(ui, icons::BACK, &back, view.can_play, size::ICON_LARGE).clicked() {
+            actions.push(Action::SeekBy(-SEEK_STEP_MS));
+        }
+        let forward = format!("Forward 5 s ({})", shortcut_hint(ui.ctx(), Modifiers::COMMAND, Key::CloseBracket));
+        if widgets::icon_button_sized(ui, icons::FORWARD, &forward, view.can_play, size::ICON_LARGE).clicked() {
+            actions.push(Action::SeekBy(SEEK_STEP_MS));
+        }
+        let p = palette(ui);
+        ui.label(RichText::new(format_offset(view.offset_ms)).font(theme::mono(size::BODY)).color(p.text));
+        ui.label(RichText::new(format!("/ {}", format_offset(duration))).font(theme::mono(size::BODY)).color(p.text_muted));
         if let Some(seek) = timeline::show(ui, view, session, duration) {
             actions.push(seek);
         }
-        if let Some(problem) = view.playback_problem {
-            ui.label(egui::RichText::new(problem).weak().small());
-        }
     });
-    ui.add_space(6.0);
-    composer::show(ui, view, actions);
-    ui.separator();
-    notes::show(ui, view, session, notes::Mode::Playback, actions);
+    if let Some(problem) = view.playback_problem {
+        ui.label(RichText::new(problem).size(size::SMALL).color(palette(ui).text_muted));
+    }
 }
 
-fn transport(ui: &mut egui::Ui, view: &View, duration: u64, actions: &mut Vec<Action>) {
-    ui.horizontal(|ui| {
-        let play_label = if view.playing { "Pause" } else { "Play" };
-        let play = egui::Button::new(play_label).shortcut_text(shortcut_hint(ui.ctx(), Modifiers::COMMAND, Key::R));
-        if ui.add_enabled(view.can_play, play).clicked() {
-            actions.push(Action::TogglePlay);
-        }
-        let back = format!("Back 5 s ({})", shortcut_hint(ui.ctx(), Modifiers::COMMAND, Key::OpenBracket));
-        if ui.add_enabled(view.can_play, egui::Button::new("−5 s")).on_hover_text(back).clicked() {
-            actions.push(Action::SeekBy(-SEEK_STEP_MS));
-        }
-        let fwd = format!("Forward 5 s ({})", shortcut_hint(ui.ctx(), Modifiers::COMMAND, Key::CloseBracket));
-        if ui.add_enabled(view.can_play, egui::Button::new("+5 s")).on_hover_text(fwd).clicked() {
-            actions.push(Action::SeekBy(SEEK_STEP_MS));
-        }
-        let clock = format!("{} / {}", format_offset(view.offset_ms), format_offset(duration));
-        ui.label(egui::RichText::new(clock).monospace().size(20.0));
-    });
+fn play_button(ui: &mut egui::Ui, view: &View, actions: &mut Vec<Action>) {
+    let p = palette(ui);
+    let (label, icon) = if view.playing { ("Pause", icons::PAUSE) } else { ("Play", icons::PLAY) };
+    let sense = if view.can_play { Sense::click() } else { Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(BIG_BUTTON, BIG_BUTTON), sense);
+    let painter = ui.painter();
+    let fill = if view.can_play { p.accent } else { p.track };
+    painter.circle_filled(rect.center(), BIG_BUTTON / 2.0, fill);
+    widgets::paint_centered(painter, rect, icon, theme::icon_font(20.0), if view.can_play { p.on_accent } else { p.text_muted });
+    if response.has_focus() {
+        painter.circle_stroke(rect.center(), BIG_BUTTON / 2.0 + 3.0, Stroke::new(2.0, p.accent));
+    }
+    let hint = shortcut_hint(ui.ctx(), Modifiers::COMMAND, Key::R);
+    widgets::name(&response, Role::Button, label);
+    if response.on_hover_text(format!("{label} ({hint})")).clicked() && view.can_play {
+        actions.push(Action::TogglePlay);
+    }
 }

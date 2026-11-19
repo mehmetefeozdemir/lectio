@@ -1,7 +1,7 @@
-// Lectio recording worklet (ADR-009).
+// Lectio recording worklet (ADR-010).
 //
 // Runs on the browser's audio rendering thread, which, like the native audio
-// callback in ADR-008, has a hard deadline. It mixes each 128-frame block to
+// callback in ADR-009, has a hard deadline. It mixes each 128-frame block to
 // mono, collects BATCH samples, and posts the batch to the page, where Rust
 // downsamples it to 16 kHz and keeps it. Batching keeps the message rate low
 // (about 12 per second at 48 kHz). Each batch's buffer is *transferred*,

@@ -1,5 +1,5 @@
 //! Turning microphone audio into Lectio's stored format: 16 kHz, mono,
-//! 16-bit (see ADR-004). Pure arithmetic, so it is tested without a mic.
+//! 16-bit (see ADR-005). Pure arithmetic, so it is tested without a mic.
 
 /// Average of one multi-channel frame (e.g. left + right) as a mono sample.
 pub fn downmix(frame: &[f32]) -> f32 {
@@ -18,7 +18,7 @@ pub fn to_i16(sample: f32) -> i16 {
 /// mono, fed in chunks of any size. A chunk may end in the middle of a
 /// frame (e.g. after the left sample of a stereo pair); the partial frame is
 /// carried over, so chunked calls give exactly the same output as one big
-/// call. Runs on the writer thread, never on the real-time callback (P-006).
+/// call. Runs on the writer thread, never on the real-time callback (P-007).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpeechConverter {
     channels: usize,

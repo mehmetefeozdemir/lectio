@@ -1,4 +1,4 @@
-// Web smoke test for the trunk build (ADR-009).
+// Web smoke test for the trunk build (ADR-010).
 //
 // Usage: node tools/web-smoke.mjs <url> [step ...]
 //        node tools/web-smoke.mjs <url> --flow phase2      (a named flow, see FLOWS)
@@ -12,12 +12,14 @@
 //     --upload FILE      the next file chooser the page opens gets FILE (Phase 2 imports)
 //     --drag X1,Y1,X2,Y2 press, move in small steps and release (drawing a sketch)
 //     --scroll X,Y,DY    mouse wheel at X,Y by DY pixels (positive = down)
+//     --click-name NAME  click the control with this accessible name (needs #test in the URL)
+//     --drag-in NAME,X1,Y1,X2,Y2  drag inside that control; positions are fractions 0..1
 //     --expect-stored K=V,…  read the app's IndexedDB and fail unless the counts
 //                        match, e.g. notes=3,linked=3,attachments=2,decks=1,blobs=3
 //                        (egui draws on a canvas, so the stored data is what we can check)
 //   Set CHROME=/path/to/chrome to use another browser binary.
 //   (Steps use coordinates because egui draws on a <canvas> and, on the web,
-//   does not expose its widgets to the DOM accessibility tree; PROBLEMS P-012.)
+//   does not expose its widgets to the DOM accessibility tree; PROBLEMS P-013.)
 //
 // Chrome runs headless with a *fake microphone* (a test tone) and the
 // microphone permission auto-granted, so recording can be tested too.
@@ -33,37 +35,47 @@ import { dirname, join, resolve } from "node:path";
 
 /**
  * Named flows (`--flow NAME`), so CI and people don't retype long step lists.
- * Coordinates match the default layout in a 1400×900 window (P-010: they
- * break if the layout changes; re-measure from the screenshots).
+ * They find controls by accessible name (`--click-name`), which the app
+ * publishes when the URL contains `#test` (see src/entry_web.rs). Open the
+ * page as `index.html#test`.
  */
 const SAMPLE_PDF = new URL("../assets/sample-slides.pdf", import.meta.url).pathname;
 const FLOWS = {
-  // Phase 2 end to end: import a PDF through the real file chooser, record,
-  // type a note (auto-linked to slide 1), turn to slide 2, draw and save a
+  // End to end: start on Home, add a course and a session, import a PDF
+  // through the real file chooser, record (slide 1 is posted to the feed),
+  // type a note (auto-linked to slide 1), turn to slide 2 and post it, add a
+  // heading, draw and save a
   // sketch, take a photo with Chrome's fake camera, stop, reload the page,
   // reopen the lecture (everything must come back from IndexedDB), then the
   // reading view, scrolled down to the photo.
   phase2: [
-    "--click", "95,174", "--type", "CSCA67", "--key", "Enter", "--wait", "500",
-    "--click", "85,143", "--wait", "800",
-    "--upload", SAMPLE_PDF, "--click", "1325,79", "--wait", "2500",
-    "--click", "372,170", "--wait", "1500",
-    "--click", "580,225", "--type", "BFS uses a queue", "--key", "Enter", "--wait", "500",
-    "--click", "1183,141", "--wait", "800",
-    "--click", "733,299", "--wait", "800",
-    "--drag", "500,250,900,250", "--drag", "700,250,550,480", "--drag", "700,250,850,480",
-    "--click", "563,621", "--type", "Queue diagram", "--wait", "300",
-    "--click", "521,658", "--wait", "1000",
-    "--click", "624,299", "--wait", "3000", "--shot", "shots/web-flow-camera.png",
-    "--click", "429,581", "--wait", "1500",
-    "--click", "519,170", "--wait", "2500",
+    "--click-name", "Add a course", "--type", "CSCA67", "--key", "Enter", "--wait", "500",
+    "--click-name", "New session", "--wait", "800",
+    "--upload", SAMPLE_PDF, "--click-name", "Import PDF", "--wait", "2500",
+    "--click-name", "Start recording", "--wait", "1500",
+    "--click-name", "Note text", "--type", "BFS uses a queue", "--key", "Enter", "--wait", "500",
+    "--click-name", "Next slide (Page Down)", "--wait", "800",
+    "--click-name", "Post this slide", "--wait", "800",
+    "--click-name", "Note text", "--type", "Overview", "--click-name", "Label this moment: Heading", "--wait", "800",
+    "--shot", "shots/workflow-web-recording.png",
+    "--click-name", "Add a sketch", "--wait", "800",
+    "--drag-in", "Sketch canvas,0.2,0.2,0.8,0.2", "--drag-in", "Sketch canvas,0.5,0.2,0.3,0.8",
+    "--drag-in", "Sketch canvas,0.5,0.2,0.7,0.8",
+    "--click-name", "Sketch caption", "--type", "Queue diagram", "--wait", "300",
+    "--click-name", "Save sketch", "--wait", "1000",
+    "--click-name", "Take a photo with the camera", "--wait", "3000", "--shot", "shots/web-flow-camera.png",
+    "--click-name", "Take the photo", "--wait", "1500",
+    "--click-name", "Stop and save", "--wait", "2500",
     "--reload", "--wait", "1500",
-    // 3 notes (typed, sketch, photo), all linked to a slide; 2 images; 1 deck;
-    // 3 blobs (PDF, sketch PNG, photo JPEG), read back after the reload.
-    "--expect-stored", "notes=3,linked=3,attachments=2,decks=1,blobs=3",
-    "--click", "69,143", "--wait", "3000", "--shot", "shots/web-flow-after-reload.png",
-    "--click", "1187,20", "--wait", "1500", "--shot", "shots/web-flow-reading.png",
-    "--scroll", "600,500,700", "--scroll", "600,500,700", "--wait", "800", "--shot", "shots/web-flow-reading-photo.png",
+    // 6 feed items: slide 1 (posted when recording started), the typed note,
+    // slide 2 (posted), a heading, the sketch and the photo, all linked to a
+    // slide ("link new notes" is on); 2 images; 1 deck; 3 blobs (PDF, sketch
+    // PNG, photo JPEG), read back after the reload.
+    "--expect-stored", "notes=6,linked=6,slides=2,attachments=2,decks=1,blobs=3",
+    "--click-name", "Session: Lecture 1", "--wait", "3000", "--shot", "shots/web-flow-after-reload.png",
+    "--click-name", "Reading view", "--wait", "1500", "--shot", "shots/web-flow-reading.png",
+    "--scroll", "700,500,700", "--scroll", "700,500,700", "--wait", "800", "--shot", "shots/web-flow-reading-photo.png",
+    "--click-name", "Back to sessions", "--wait", "800", "--shot", "shots/workflow-web-home.png",
   ],
 };
 
@@ -162,10 +174,7 @@ async function runSteps(cdp, args) {
       }
       case "--click": {
         const [x, y] = value.split(",").map(Number);
-        for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
-          await cdp.send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
-        }
-        await sleep(300);
+        await clickAt(cdp, x, y);
         i++;
         break;
       }
@@ -205,17 +214,21 @@ async function runSteps(cdp, args) {
       }
       case "--drag": {
         const [x1, y1, x2, y2] = value.split(",").map(Number);
-        const steps = 12;
-        await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: x1, y: y1 });
-        await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: x1, y: y1, button: "left", clickCount: 1 });
-        for (let s = 1; s <= steps; s++) {
-          const x = x1 + ((x2 - x1) * s) / steps;
-          const y = y1 + ((y2 - y1) * s) / steps;
-          await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "left", buttons: 1 });
-          await sleep(16); // about one frame per step
-        }
-        await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: x2, y: y2, button: "left", clickCount: 1 });
-        await sleep(200);
+        await drag(cdp, x1, y1, x2, y2);
+        i++;
+        break;
+      }
+      case "--click-name": {
+        const r = await findNamed(cdp, value);
+        await clickAt(cdp, r.x + r.w / 2, r.y + r.h / 2);
+        i++;
+        break;
+      }
+      case "--drag-in": {
+        const [name, ...f] = value.split(",");
+        const [fx1, fy1, fx2, fy2] = f.map(Number);
+        const r = await findNamed(cdp, name);
+        await drag(cdp, r.x + r.w * fx1, r.y + r.h * fy1, r.x + r.w * fx2, r.y + r.h * fy2);
         i++;
         break;
       }
@@ -245,6 +258,38 @@ async function runSteps(cdp, args) {
   }
 }
 
+async function clickAt(cdp, x, y) {
+  for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
+    await cdp.send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+  }
+  await sleep(300);
+}
+
+async function drag(cdp, x1, y1, x2, y2) {
+  const steps = 12;
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: x1, y: y1 });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: x1, y: y1, button: "left", clickCount: 1 });
+  for (let s = 1; s <= steps; s++) {
+    const x = x1 + ((x2 - x1) * s) / steps;
+    const y = y1 + ((y2 - y1) * s) / steps;
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "left", buttons: 1 });
+    await sleep(16); // about one frame per step
+  }
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: x2, y: y2, button: "left", clickCount: 1 });
+  await sleep(200);
+}
+
+/** The rectangle of the named control, waiting up to 5 s for it to appear. */
+async function findNamed(cdp, name) {
+  for (let attempt = 0; attempt < 25; attempt++) {
+    const res = await cdp.send("Runtime.evaluate", { expression: "window.__lectioWidgets || '[]'", returnByValue: true });
+    const found = JSON.parse(res.result.value).find((w) => w.name === name);
+    if (found) return found;
+    await sleep(200);
+  }
+  throw new Error(`no control named "${name}" (is #test in the URL?)`);
+}
+
 /** Counts what Lectio saved in IndexedDB "lectio" (see src/platform/web/idb.rs). */
 async function storedCounts(cdp) {
   const expression = `(async () => {
@@ -265,6 +310,7 @@ async function storedCounts(cdp) {
     return {
       notes: notes.length,
       linked: notes.filter((n) => n.slide).length,
+      slides: notes.filter((n) => n.kind === "slide").length,
       attachments: notes.filter((n) => n.attachment).length,
       decks: sessions.flatMap((s) => s.decks || []).length,
       blobs,

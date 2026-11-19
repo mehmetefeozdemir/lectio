@@ -52,7 +52,7 @@ impl Platform for NativePlatform {
 
     /// Opens the OS dialog and waits for it. That pauses drawing while the
     /// dialog is open, but recording keeps going: audio runs on its own
-    /// threads (ADR-008). macOS requires dialogs on the main thread, which
+    /// threads (ADR-009). macOS requires dialogs on the main thread, which
     /// is where egui calls us.
     fn pick_file(&self, kind: FileKind) -> Pending<Option<PickedFile>> {
         let (name, extensions) = kind.filter();
@@ -73,6 +73,21 @@ impl Platform for NativePlatform {
 
     fn get_blob(&self, key: &BlobKey) -> Pending<Vec<u8>> {
         Pending::ready(self.blobs.get(key).map_err(|e| e.to_string()))
+    }
+
+    fn delete_recording(&self, file_name: &str) -> Result<(), String> {
+        match std::fs::remove_file(self.store.audio_path(file_name)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+            _ => Ok(()),
+        }
+    }
+
+    fn save_text_file(&self, suggested_name: &str, text: &str) -> Result<bool, String> {
+        let Some(path) = rfd::FileDialog::new().add_filter("Markdown", &["md"]).set_file_name(suggested_name).save_file()
+        else {
+            return Ok(false);
+        };
+        std::fs::write(&path, text).map(|()| true).map_err(|e| format!("Could not save {}: {e}", path.display()))
     }
 
     fn delete_blob(&self, key: &BlobKey) -> Result<(), String> {

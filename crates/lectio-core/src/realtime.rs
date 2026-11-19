@@ -1,4 +1,4 @@
-//! Arithmetic used by the real-time audio callback (ADR-008).
+//! Arithmetic used by the real-time audio callback (ADR-009).
 //!
 //! The callback runs on the OS audio thread with a hard deadline, so it may
 //! not allocate, lock or block. These helpers are plain integer maths, which

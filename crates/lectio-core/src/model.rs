@@ -8,16 +8,34 @@ use serde::{Deserialize, Serialize};
 
 use crate::labels::validated_name;
 use crate::material::{Attachment, SlideDeck, SlideLink};
+use crate::prefs::Preferences;
 use crate::{CourseId, LabelKind, LabelSet, ModelError, NoteId, SessionId};
 
 /// Version of the `library.json` format. Bump it when the format changes.
-/// 1 = Phase 1. 2 = Phase 2 (slide decks, slide links, photo/sketch notes);
-/// version 1 files still load because every new field has a default.
-pub const SCHEMA_VERSION: u32 = 2;
+/// 1 = Phase 1. 2 = Phase 2 (slide decks, slide links, photo/sketch notes).
+/// 3 = session workflow (Heading label, slide items, trash, preferences).
+/// Older files still load because every new field has a default.
+pub const SCHEMA_VERSION: u32 = 3;
+
+/// What a feed item is. Older files have no `kind`: they are text notes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NoteKind {
+    #[default]
+    Text,
+    /// A slide posted to the feed; `slide` says which page, `body` is its title.
+    Slide,
+}
+
+fn is_text(kind: &NoteKind) -> bool {
+    *kind == NoteKind::Text
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Note {
     pub id: NoteId,
+    #[serde(default, skip_serializing_if = "is_text")]
+    pub kind: NoteKind,
     /// Position in the session's recording, in milliseconds from its start.
     pub offset_ms: u64,
     pub body: String,
@@ -26,15 +44,20 @@ pub struct Note {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slide: Option<SlideLink>,
     /// A photo or sketch. Only its key is stored here; the image itself is
-    /// a separate blob (ADR-011).
+    /// a separate blob (ADR-012).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachment: Option<Attachment>,
 }
 
 impl Note {
-    /// Every note must carry something: text, a label or an image.
+    /// Every note must carry something: text, a label, an image or a slide.
     pub fn has_content(&self) -> bool {
-        !self.body.is_empty() || !self.labels.is_empty() || self.attachment.is_some()
+        !self.body.is_empty() || !self.labels.is_empty() || self.attachment.is_some() || self.kind == NoteKind::Slide
+    }
+
+    /// Shown as a section title in the feed and the reading view.
+    pub fn is_heading(&self) -> bool {
+        self.labels.contains(&LabelKind::Heading)
     }
 }
 
@@ -57,6 +80,9 @@ pub struct Session {
     /// Imported PDF slide decks (Phase 2). Missing in version 1 files.
     #[serde(default)]
     pub decks: Vec<SlideDeck>,
+    /// Set when the session is moved to the trash (restorable for 30 days).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_unix_ms: Option<u64>,
 }
 
 impl Session {
@@ -81,11 +107,14 @@ pub struct Library {
     schema_version: u32,
     courses: Vec<Course>,
     labels: LabelSet,
+    /// The user's layout and theme choices (saved with the library).
+    #[serde(default)]
+    preferences: Preferences,
 }
 
 impl Default for Library {
     fn default() -> Self {
-        Self { schema_version: SCHEMA_VERSION, courses: Vec::new(), labels: LabelSet::default() }
+        Self { schema_version: SCHEMA_VERSION, courses: Vec::new(), labels: LabelSet::default(), preferences: Preferences::default() }
     }
 }
 
@@ -105,6 +134,19 @@ impl Library {
 
     pub fn labels(&self) -> &LabelSet {
         &self.labels
+    }
+
+    pub fn preferences(&self) -> &Preferences {
+        &self.preferences
+    }
+
+    pub fn with_preferences(&self, preferences: Preferences) -> Library {
+        Library { preferences, ..self.clone() }
+    }
+
+    /// A copy with these courses (used by the trash to drop sessions).
+    pub(crate) fn with_courses(&self, courses: Vec<Course>) -> Library {
+        Library { courses, ..self.clone() }
     }
 
     pub fn course(&self, id: CourseId) -> Option<&Course> {
@@ -143,6 +185,7 @@ impl Library {
             recording: None,
             notes: Vec::new(),
             decks: Vec::new(),
+            deleted_unix_ms: None,
         };
         let id = session.id;
         let next = self.map_course(course, |c| {
@@ -151,6 +194,12 @@ impl Library {
             Ok(Course { sessions, ..c.clone() })
         })?;
         Ok((next, id))
+    }
+
+    /// Renames a session (inline title editing); everything else stays.
+    pub fn with_session_renamed(&self, session: SessionId, title: &str) -> Result<Library, ModelError> {
+        let title = validated_name(title)?;
+        self.map_session(session, |s| Ok(Session { title, ..s.clone() }))
     }
 
     /// Adds a note at `offset_ms`. A note with no text but at least one label
@@ -296,6 +345,7 @@ impl Library {
 pub(crate) fn new_note(offset_ms: u64, body: &str, labels: &[LabelKind], attachment: Option<Attachment>) -> Note {
     Note {
         id: NoteId::new_random(),
+        kind: NoteKind::Text,
         offset_ms,
         body: body.trim().to_owned(),
         labels: unique_labels(labels),

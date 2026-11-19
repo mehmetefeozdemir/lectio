@@ -8,6 +8,14 @@ use lectio_core::{LabelKind, Library, ModelError, Recording, SessionId};
 use crate::media::sketch::{SKETCH_HEIGHT, SKETCH_WIDTH, StrokePoints, rasterize_png};
 
 const MINUTE_MS: u64 = 60_000;
+const DAY_MS: u64 = 86_400_000;
+/// 2026-11-17 (UTC), the sample's main lecture day, as days since 1970-01-01.
+const SAMPLE_DAY: i64 = 20_774;
+
+/// 10:00 UTC on the sample day plus `offset` days.
+fn lecture_day(offset: i64) -> u64 {
+    (SAMPLE_DAY + offset) as u64 * DAY_MS + 10 * 60 * MINUTE_MS
+}
 /// A two-slide deck (also used by the slide tests and the web smoke test).
 const SAMPLE_SLIDES: &[u8] = include_bytes!("../assets/sample-slides.pdf");
 
@@ -24,11 +32,13 @@ pub fn sample_library() -> Sample {
 
 fn try_sample_library() -> Result<Sample, ModelError> {
     let (lib, algorithms) = Library::default().with_course("CSCA67")?;
-    let (lib, _) = lib.with_session(algorithms, "Lecture 1", 0)?;
-    let (lib, _) = lib.with_session(algorithms, "Lecture 2", 0)?;
-    let (lib, session) = lib.with_session(algorithms, "Lecture 3", 0)?;
+    let (lib, _) = lib.with_session(algorithms, "Lecture 1", lecture_day(-14))?;
+    let (lib, _) = lib.with_session(algorithms, "Lecture 2", lecture_day(-7))?;
+    let (lib, session) = lib.with_session(algorithms, "Graph traversal", lecture_day(0))?;
     let (lib, calculus) = lib.with_course("MATA31")?;
-    let (lib, _) = lib.with_session(calculus, "Lecture 1", 0)?;
+    let (lib, _) = lib.with_session(calculus, "Limits", lecture_day(1))?;
+    let (lib, old_session) = lib.with_session(calculus, "Office hours (test run)", lecture_day(-3))?;
+    let lib = lib.with_session_trashed(old_session, lecture_day(2))?;
 
     let lib = lib.with_recording(
         session,
@@ -52,6 +62,13 @@ fn try_sample_library() -> Result<Sample, ModelError> {
         let link = page.map(|page| SlideLink { deck, page });
         lib.with_slide_link(session, note, link)
     })?;
+
+    // Section headings and slides posted to the feed (ADR-015).
+    let (lib, _) = lib.with_note(session, 30_000, "Graph basics", &[LabelKind::Heading])?;
+    let (lib, _) = lib.with_slide_item(session, MINUTE_MS, SlideLink { deck, page: 1 })?;
+    let (lib, _) = lib.with_note(session, 14 * MINUTE_MS + 30_000, "Breadth-first search", &[LabelKind::Heading])?;
+    let (lib, bfs_slide) = lib.with_slide_item(session, 15 * MINUTE_MS, SlideLink { deck, page: 2 })?;
+    let lib = lib.with_note_text(session, bfs_slide, "BFS step by step")?;
 
     let sketch_png = rasterize_png(&sample_tree()).map_err(|_| ModelError::UnsupportedFile)?;
     let sketch_key = BlobKey::new_random(MediaKind::Png);

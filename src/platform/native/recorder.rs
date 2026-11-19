@@ -1,4 +1,4 @@
-//! Records the default microphone straight to a WAV file (ADR-008).
+//! Records the default microphone straight to a WAV file (ADR-009).
 //!
 //! Three parties are involved:
 //! - the **audio callback** runs on the OS real-time audio thread, which has a
@@ -44,6 +44,8 @@ struct Shared {
     max_callback_frames: AtomicU64,
     samples_written: AtomicU64,
     peak_bits: AtomicU32,
+    /// Loudest sample of the most recent chunk (for the level meter).
+    level_bits: AtomicU32,
     /// Only for rare non-real-time errors (device unplugged); written with
     /// `try_lock`, so even that path can't block.
     last_error: Mutex<Option<String>>,
@@ -150,6 +152,9 @@ impl AudioCapture for Recorder {
     fn samples_written(&self) -> u64 {
         Recorder::samples_written(self)
     }
+    fn level(&self) -> f32 {
+        f32::from_bits(self.shared.level_bits.load(Ordering::Relaxed))
+    }
     fn stats(&self) -> RecorderStats {
         Recorder::stats(self)
     }
@@ -208,11 +213,14 @@ fn spawn_writer(
             converter = converter.process(first, &mut out).process(second, &mut out);
             chunk.commit_all();
 
+            let mut chunk_peak = 0.0f32;
             for &sample in &out {
-                peak = peak.max(sample.abs());
+                chunk_peak = chunk_peak.max(sample.abs());
                 wav.write_sample(to_i16(sample)).map_err(|e| err("Writing audio failed", e))?;
             }
+            peak = peak.max(chunk_peak);
             shared.peak_bits.store(peak.to_bits(), Ordering::Relaxed);
+            shared.level_bits.store(chunk_peak.to_bits(), Ordering::Relaxed);
             shared.samples_written.fetch_add(out.len() as u64, Ordering::SeqCst);
         }
         wav.finalize().map_err(|e| err("Finishing the audio file failed", e))

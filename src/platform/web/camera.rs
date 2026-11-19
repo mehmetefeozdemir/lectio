@@ -1,4 +1,4 @@
-//! The browser camera for photo notes (ADR-012).
+//! The browser camera for photo notes (ADR-013).
 //!
 //! `getUserMedia({video})` asks for camera permission and returns a live
 //! stream. A hidden `<video>` element plays it; to show a preview inside egui

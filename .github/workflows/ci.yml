@@ -97,9 +97,8 @@ jobs:
 
       # Phase 2 browser flow (tools/web-smoke.mjs --flow phase2): import a PDF,
       # record, note, sketch, fake-camera photo, reload, check IndexedDB.
-      # Advisory for now: it clicks fixed coordinates (PROBLEMS P-010) and has
-      # not yet proven stable on CI machines. Make it required once it has been
-      # green for a few runs.
+      # Controls are found by accessible name (`#test` in the URL, PROBLEMS
+      # P-017, P-020). Advisory until it has been green on CI for a few runs.
       - uses: actions/setup-node@v4
         with:
           node-version: 22 # built-in WebSocket, used by the script
@@ -109,7 +108,7 @@ jobs:
         run: |
           python3 -m http.server 8765 --bind 127.0.0.1 --directory dist &
           sleep 1
-          CHROME="$(command -v google-chrome)" node tools/web-smoke.mjs "http://127.0.0.1:8765/index.html" --flow phase2
+          CHROME="$(command -v google-chrome)" node tools/web-smoke.mjs "http://127.0.0.1:8765/index.html#test" --flow phase2
 
       - name: Upload the browser smoke-test screenshots
         if: always()

@@ -9,12 +9,12 @@ fn library_with_session() -> (Library, SessionId) {
 }
 
 #[test]
-fn new_library_has_four_default_labels_and_no_courses() {
+fn new_library_has_five_default_labels_and_no_courses() {
     let lib = Library::default();
 
     assert!(lib.courses().is_empty());
     let names: Vec<&str> = lib.labels().iter().map(|l| l.name.as_str()).collect();
-    assert_eq!(names, ["Important", "Review", "Task", "Definition"]);
+    assert_eq!(names, ["Important", "Review", "Task", "Definition", "Heading"]);
 }
 
 #[test]
@@ -195,4 +195,23 @@ fn json_from_a_newer_app_version_is_refused() {
     let json = r#"{"schema_version": 999, "courses": [], "labels": {"labels": []}}"#;
     let err = Library::from_json(json).unwrap_err();
     assert!(matches!(err, ModelError::UnsupportedSchema { found: 999, .. }));
+}
+
+#[test]
+fn a_session_can_be_renamed_and_keeps_everything_else() {
+    let (lib, session) = library_with_session();
+    let (lib, _) = lib.with_note(session, 10, "kept", &[]).unwrap();
+
+    let renamed = lib.with_session_renamed(session, "  Graph traversal ").unwrap();
+
+    let s = renamed.session(session).unwrap();
+    assert_eq!(s.title, "Graph traversal");
+    assert_eq!(s.notes.len(), 1);
+    assert_eq!(lib.session(session).unwrap().title, "Lecture 1", "the old value is unchanged");
+}
+
+#[test]
+fn a_session_title_must_not_be_blank() {
+    let (lib, session) = library_with_session();
+    assert_eq!(lib.with_session_renamed(session, "  ").unwrap_err(), ModelError::EmptyName);
 }

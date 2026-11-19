@@ -22,7 +22,7 @@ pub fn decode_mono_i16(source: impl Read) -> Result<(Vec<i16>, u32), AudioError>
     Ok((mono, spec.sample_rate))
 }
 
-/// The WAV format Lectio stores (ADR-004).
+/// The WAV format Lectio stores (ADR-005).
 pub fn mono_spec(sample_rate: u32) -> hound::WavSpec {
     hound::WavSpec { channels: 1, sample_rate, bits_per_sample: 16, sample_format: hound::SampleFormat::Int }
 }

@@ -1,7 +1,10 @@
 //! Web entry point: opens browser storage, then starts the egui app on the
 //! page's canvas. `index.html#sample` starts with sample data instead.
 
-use eframe::wasm_bindgen::JsCast;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use eframe::egui;
+use eframe::wasm_bindgen::{JsCast, JsValue};
 
 use crate::app::{LectioApp, Startup};
 use crate::platform::Platform;
@@ -9,6 +12,9 @@ use crate::platform::web::WebPlatform;
 
 const CANVAS_ID: &str = "lectio_canvas";
 const STATUS_ID: &str = "lectio_status";
+/// Set by `#test` in the URL: publish named controls for the browser test.
+static TEST_HOOKS: AtomicBool = AtomicBool::new(false);
+const WIDGETS_GLOBAL: &str = "__lectioWidgets";
 
 pub fn start() {
     wasm_bindgen_futures::spawn_local(async {
@@ -28,7 +34,9 @@ async fn run() -> Result<(), String> {
         .dyn_into::<web_sys::HtmlCanvasElement>()
         .map_err(|_| "the canvas element is not a canvas")?;
 
-    let wants_sample = window.location().hash().is_ok_and(|hash| hash == "#sample");
+    let hash = window.location().hash().unwrap_or_default();
+    let wants_sample = hash.contains("sample");
+    TEST_HOOKS.store(hash.contains("test"), Ordering::Relaxed);
     let startup = if wants_sample {
         Startup::Sample
     } else {
@@ -50,5 +58,26 @@ fn set_status(message: Option<&str>) {
     match message {
         Some(text) => element.set_text_content(Some(text)),
         None => element.remove(),
+    }
+}
+
+/// With `#test` in the URL, publishes `[{name, x, y, w, h}]` (CSS pixels) of
+/// every named control as `window.__lectioWidgets`, so the browser test can
+/// click controls by their accessible name. egui draws everything on one
+/// canvas, so there is no DOM element to find.
+pub fn publish_named_widgets(ctx: &egui::Context) {
+    if !TEST_HOOKS.load(Ordering::Relaxed) {
+        return;
+    }
+    let entries: Vec<String> = crate::ui::widgets::named_widgets(ctx)
+        .into_iter()
+        .map(|(name, r)| {
+            let name = name.replace('\\', "\\\\").replace('"', "\\\"");
+            format!(r#"{{"name":"{name}","x":{},"y":{},"w":{},"h":{}}}"#, r.left(), r.top(), r.width(), r.height())
+        })
+        .collect();
+    if let Some(window) = web_sys::window() {
+        let json = JsValue::from_str(&format!("[{}]", entries.join(",")));
+        let _ = js_sys::Reflect::set(&window, &JsValue::from_str(WIDGETS_GLOBAL), &json);
     }
 }

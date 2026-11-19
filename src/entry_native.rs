@@ -6,6 +6,7 @@ use std::process::ExitCode;
 
 use eframe::egui;
 
+use crate::action::Screen;
 use crate::app::{LectioApp, Startup};
 use crate::platform::native::NativePlatform;
 use crate::self_test;
@@ -45,6 +46,24 @@ pub fn run() -> ExitCode {
                 Some(path) => LectioApp::new(cc, Startup::Sample).with_screenshot(path),
                 None => LectioApp::new(cc, Startup::Saved(Ok(Box::new(NativePlatform::open())))),
             };
+            // Test aid: LECTIO_START=home|trash|collections opens on that screen (screenshots).
+            let app = match std::env::var("LECTIO_START").as_deref() {
+                Ok("home") => app.with_screen(Screen::Home),
+                Ok("trash") => app.with_screen(Screen::Trash),
+                Ok("collections") => app.with_screen(Screen::Collections),
+                _ => app,
+            };
+            // Test aid: LECTIO_PANELS=feed,audio shows only those workspace panels.
+            let app = match std::env::var("LECTIO_PANELS") {
+                Ok(panels) => app.with_panels(&panels),
+                Err(_) => app,
+            };
+            // Test aid: LECTIO_THEME=dark|light forces a theme (screenshots).
+            match std::env::var("LECTIO_THEME").as_deref() {
+                Ok("dark") => cc.egui_ctx.set_theme(egui::ThemePreference::Dark),
+                Ok("light") => cc.egui_ctx.set_theme(egui::ThemePreference::Light),
+                _ => {}
+            }
             Ok(Box::new(app))
         }),
     );
@@ -79,10 +98,19 @@ fn parse_seconds(text: &str) -> Result<u64, String> {
     }
 }
 
+/// `LECTIO_WINDOW_SIZE=1280x800` overrides the start size (layout checks).
+fn window_size() -> [f32; 2] {
+    let parsed = std::env::var("LECTIO_WINDOW_SIZE").ok().and_then(|v| {
+        let (w, h) = v.split_once('x')?;
+        Some([w.trim().parse().ok()?, h.trim().parse().ok()?])
+    });
+    parsed.unwrap_or(DEFAULT_WINDOW_SIZE)
+}
+
 fn native_options(for_screenshot: bool) -> eframe::NativeOptions {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title(WINDOW_TITLE)
-        .with_inner_size(DEFAULT_WINDOW_SIZE)
+        .with_inner_size(window_size())
         .with_min_inner_size(MIN_WINDOW_SIZE);
     if for_screenshot {
         // Never take focus away from whatever the user is doing.

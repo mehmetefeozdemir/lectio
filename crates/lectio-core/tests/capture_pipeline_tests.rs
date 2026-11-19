@@ -1,4 +1,4 @@
-//! The capture pipeline after P-006: the real-time callback only copies raw
+//! The capture pipeline after P-007: the real-time callback only copies raw
 //! interleaved samples into a ring buffer; the writer thread converts them.
 //! Ring-buffer reads arrive in arbitrary chunks (a chunk can even end in the
 //! middle of a stereo frame), so chunked conversion must match one big call.

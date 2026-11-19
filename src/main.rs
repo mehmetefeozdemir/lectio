@@ -1,4 +1,4 @@
-//! Lectio: lecture notes timestamped to the audio (ADR-009: one codebase for
+//! Lectio: lecture notes timestamped to the audio (ADR-010: one codebase for
 //! Windows, macOS, Linux and the web).
 //!
 //! Native usage:

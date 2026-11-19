@@ -1,4 +1,4 @@
-//! The platform boundary (ADR-009).
+//! The platform boundary (ADR-010).
 //!
 //! The app talks only to these traits. Each target supplies its own
 //! implementation, chosen at compile time:
@@ -6,11 +6,11 @@
 //! | Part       | Windows / macOS / Linux (`native`)   | Browser (`web`)                          |
 //! |------------|--------------------------------------|------------------------------------------|
 //! | storage    | `JsonFileStore`: JSON + WAV files    | IndexedDB (`web::store`)                 |
-//! | recording  | `cpal` + lock-free ring (ADR-008)    | `getUserMedia` + `AudioWorklet`          |
+//! | recording  | `cpal` + lock-free ring (ADR-009)    | `getUserMedia` + `AudioWorklet`          |
 //! | playback   | `cpal` output stream                 | Web Audio `AudioBufferSourceNode`        |
-//! | blobs      | `FileBlobStore`: `<data>/blobs/`     | IndexedDB table `blobs` (ADR-011)        |
+//! | blobs      | `FileBlobStore`: `<data>/blobs/`     | IndexedDB table `blobs` (ADR-012)        |
 //! | file picker| `rfd` native dialog (blocking)       | `rfd` `<input type=file>` (async)        |
-//! | camera     | none (file picker instead)           | `getUserMedia({video})` (ADR-012)        |
+//! | camera     | none (file picker instead)           | `getUserMedia({video})` (ADR-013)        |
 //!
 //! The rules (model, clock, seek maths, resampling) stay in `lectio-core`,
 //! which has no platform code and compiles for every target.
@@ -29,7 +29,7 @@ use eframe::egui;
 use lectio_core::material::BlobKey;
 use lectio_core::storage::LibraryStore;
 
-/// Lectio stores speech as 16 kHz mono 16-bit WAV on every platform (ADR-004).
+/// Lectio stores speech as 16 kHz mono 16-bit WAV on every platform (ADR-005).
 pub const STORE_SAMPLE_RATE: u32 = 16_000;
 
 /// Everything the app needs from the machine it runs on.
@@ -42,7 +42,7 @@ pub trait Platform {
     /// What to tell the student when the microphone can't be used.
     fn mic_help(&self) -> &'static str;
 
-    // ---- Phase 2: material (ADR-011, ADR-012) ----
+    // ---- Phase 2: material (ADR-012, ADR-013) ----
 
     /// Asks the user to choose a file. `Ok(None)` = they cancelled.
     fn pick_file(&self, kind: FileKind) -> Pending<Option<PickedFile>>;
@@ -51,8 +51,13 @@ pub trait Platform {
     fn put_blob(&self, key: &BlobKey, bytes: Vec<u8>) -> Result<(), String>;
     fn get_blob(&self, key: &BlobKey) -> Pending<Vec<u8>>;
     fn delete_blob(&self, key: &BlobKey) -> Result<(), String>;
+    /// Deletes a session's audio (when its trash period ends).
+    fn delete_recording(&self, file_name: &str) -> Result<(), String>;
+    /// Saves text (Markdown export): a save dialog on native, a download in
+    /// the browser. `Ok(false)` = the user cancelled.
+    fn save_text_file(&self, suggested_name: &str, text: &str) -> Result<bool, String>;
     /// A live camera, where the platform offers one (the browser); `None`
-    /// on native, where photos come from the file picker (ADR-012).
+    /// on native, where photos come from the file picker (ADR-013).
     fn open_camera(&self) -> Option<Box<dyn CameraSession>> {
         None
     }
@@ -137,8 +142,10 @@ impl<T> Pending<T> {
 /// A recording in progress.
 pub trait AudioCapture {
     fn set_paused(&self, paused: bool);
-    /// 16 kHz samples recorded so far: the recording clock (ADR-005).
+    /// 16 kHz samples recorded so far: the recording clock (ADR-006).
     fn samples_written(&self) -> u64;
+    /// Loudness of the latest audio, 0.0..=1.0, for the level meter.
+    fn level(&self) -> f32;
     fn stats(&self) -> RecorderStats;
     fn take_error(&self) -> Option<String>;
     /// Stops and saves the audio; returns the total 16 kHz samples.

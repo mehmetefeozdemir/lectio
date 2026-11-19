@@ -1,17 +1,20 @@
-//! The audio timeline: a bar with the played part filled in, a marker for
-//! every note, and a playhead. Click or drag to seek; clicks near a marker
-//! snap to that note. With keyboard focus, ←/→ seek 5 s and Home/End jump to
-//! the ends. All position maths is in `lectio_core::timeline`.
+//! The audio timeline: a thin track with the played part in the accent
+//! colour, a small marker per note (label notes use the label's shape and
+//! colour: diamond, circle, square, triangle), and a playhead. Click or drag
+//! to seek; clicks near a marker snap to it. With keyboard focus, ←/→ seek
+//! 5 s and Home/End jump to the ends. Position maths: `lectio_core::timeline`.
 
-use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, StrokeKind};
+use eframe::egui::{self, CornerRadius, Pos2, Rect, RichText, Sense, Stroke, StrokeKind};
 use lectio_core::timeline::{format_offset, fraction_to_offset, offset_to_fraction};
 use lectio_core::{Note, Session};
 
-use super::{SEEK_STEP_MS, View, theme};
+use super::theme::{self, palette, size};
+use super::{SEEK_STEP_MS, View, widgets};
 use crate::action::Action;
 
-const HEIGHT: f32 = 54.0;
-const TRACK_HEIGHT: f32 = 10.0;
+const HEIGHT: f32 = 36.0;
+const TRACK_HEIGHT: f32 = 4.0;
+const MARKER_RADIUS: f32 = 4.5;
 /// How close (in points) a click must be to a marker to snap to it.
 const SNAP_DISTANCE: f32 = 6.0;
 
@@ -22,19 +25,14 @@ pub fn show(ui: &mut egui::Ui, view: &View, session: &Session, duration_ms: u64)
     let track = Rect::from_center_size(rect.center(), egui::vec2(rect.width() - 16.0, TRACK_HEIGHT));
     let x_of = |offset: u64| track.left() + offset_to_fraction(offset, duration_ms) * track.width();
 
-    let label = format!(
-        "Recording position {} of {}",
-        format_offset(view.offset_ms),
-        format_offset(duration_ms)
-    );
+    let label = format!("Recording position {} of {}", format_offset(view.offset_ms), format_offset(duration_ms));
     response.widget_info(|| egui::WidgetInfo::slider(true, view.offset_ms as f64 / 1_000.0, &label));
+    widgets::name(&response, egui::Role::Slider, "Timeline");
 
     paint(ui, &response, rect, track, view, session, &x_of);
-    let hovered = response.hover_pos().and_then(|p| nearest_note(session, p, &x_of));
-    if let Some(note) = hovered {
+    if let Some(note) = response.hover_pos().and_then(|p| nearest_note(session, p, &x_of)) {
         response.clone().on_hover_ui_at_pointer(|ui| note_tooltip(ui, view, note));
     }
-
     if let Some(pos) = response.interact_pointer_pos().filter(|_| response.clicked() || response.dragged()) {
         let snapped = nearest_note(session, pos, &x_of).map(|n| n.offset_ms);
         let fraction = (pos.x - track.left()) / track.width();
@@ -43,35 +41,29 @@ pub fn show(ui: &mut egui::Ui, view: &View, session: &Session, duration_ms: u64)
     keyboard_seek(ui, &response, duration_ms)
 }
 
-fn paint(
-    ui: &egui::Ui,
-    response: &egui::Response,
-    rect: Rect,
-    track: Rect,
-    view: &View,
-    session: &Session,
-    x_of: &dyn Fn(u64) -> f32,
-) {
+fn paint(ui: &egui::Ui, response: &egui::Response, rect: Rect, track: Rect, view: &View, session: &Session, x_of: &dyn Fn(u64) -> f32) {
+    let p = palette(ui);
+    let dark = ui.visuals().dark_mode;
     let painter = ui.painter_at(rect);
-    painter.rect_filled(track, 5.0, theme::track_fill(ui));
-    let played = Rect::from_min_max(track.min, Pos2::new(x_of(view.offset_ms), track.max.y));
-    painter.rect_filled(played, 5.0, theme::progress_fill(ui));
+    let round = CornerRadius::same(2);
+    painter.rect_filled(track, round, p.track);
+    painter.rect_filled(Rect::from_min_max(track.min, Pos2::new(x_of(view.offset_ms), track.max.y)), round, p.accent);
 
     for note in &session.notes {
-        let x = x_of(note.offset_ms);
-        let color = note.labels.first().map_or(theme::NOTE_MARKER, |&k| theme::label_stroke(k));
-        painter.line_segment([Pos2::new(x, rect.top() + 8.0), Pos2::new(x, rect.bottom() - 8.0)], Stroke::new(2.0, color));
-        if !note.labels.is_empty() {
-            // A flag on top marks labelled moments, so they differ by shape too.
-            let top = rect.top() + 8.0;
-            let flag = vec![Pos2::new(x, top), Pos2::new(x + 9.0, top + 4.0), Pos2::new(x, top + 8.0)];
-            painter.add(egui::Shape::convex_polygon(flag, color, Stroke::NONE));
+        let center = Pos2::new(x_of(note.offset_ms), track.center().y - 10.0);
+        match note.labels.first() {
+            Some(&kind) => {
+                let color = theme::label_colors(kind, dark).marker;
+                widgets::paint_label_marker(&painter, kind, center, MARKER_RADIUS, color);
+            }
+            None => {
+                painter.circle_filled(center, MARKER_RADIUS - 1.5, p.marker);
+            }
         }
     }
-
     let head = Pos2::new(x_of(view.offset_ms), track.center().y);
-    painter.circle_filled(head, 8.0, ui.visuals().strong_text_color());
-    painter.circle_filled(head, 5.0, theme::progress_fill(ui));
+    painter.circle_filled(head, 7.0, p.surface);
+    painter.circle_stroke(head, 6.0, Stroke::new(2.5, p.accent));
     if response.has_focus() {
         painter.rect_stroke(rect.shrink(1.0), 6.0, ui.visuals().selection.stroke, StrokeKind::Inside);
     }
@@ -88,13 +80,14 @@ fn nearest_note<'a>(session: &'a Session, pos: Pos2, x_of: &dyn Fn(u64) -> f32) 
 }
 
 fn note_tooltip(ui: &mut egui::Ui, view: &View, note: &Note) {
-    ui.label(egui::RichText::new(format_offset(note.offset_ms)).monospace());
+    let p = palette(ui);
+    ui.label(RichText::new(format_offset(note.offset_ms)).font(theme::mono(size::CAPTION)).color(p.text_muted));
     if !note.body.is_empty() {
         ui.label(&note.body);
     }
     let names: Vec<&str> = note.labels.iter().map(|&k| view.library.labels().name(k)).collect();
     if !names.is_empty() {
-        ui.label(egui::RichText::new(names.join(", ")).color(Color32::GRAY));
+        ui.label(RichText::new(names.join(", ")).size(size::SMALL).color(p.text_muted));
     }
 }
 

@@ -1,7 +1,7 @@
-//! Local-first storage (see ADR-003).
+//! Local-first storage (see ADR-004).
 //!
 //! `LibraryStore` is the boundary between the app and wherever data lives
-//! (ADR-009). Native builds use `JsonFileStore` (a JSON file plus a folder of
+//! (ADR-010). Native builds use `JsonFileStore` (a JSON file plus a folder of
 //! WAV files); the web build implements the same trait over IndexedDB in the
 //! app crate. Both use `interpret_saved` to decide what a saved text means.
 //!
@@ -162,7 +162,7 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
 }
 
 /// Big files (PDFs, photos, sketches) on native: one file per blob in
-/// `<data>/blobs/`, named by its validated `BlobKey` (ADR-011). The web build
+/// `<data>/blobs/`, named by its validated `BlobKey` (ADR-012). The web build
 /// keeps the same keys in IndexedDB instead.
 pub struct FileBlobStore {
     dir: PathBuf,

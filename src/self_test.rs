@@ -1,6 +1,6 @@
 //! `lectio --self-test-audio <seconds>`: record from the default microphone
 //! with no window, then print what the capture pipeline did. One command for
-//! me to check the P-006 fix on a real Mac.
+//! anyone to check live capture (PROBLEMS P-007) on a real machine.
 
 use std::process::ExitCode;
 use std::time::{Duration, Instant};

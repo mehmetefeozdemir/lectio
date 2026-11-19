@@ -1,4 +1,4 @@
-//! The camera window (browser only, ADR-012): live preview and a button to
+//! The camera window (browser only, ADR-013): live preview and a button to
 //! take the photo, which becomes a photo note at the current moment.
 
 use eframe::egui;
@@ -19,7 +19,7 @@ pub fn window(ctx: &egui::Context, view: &View, actions: &mut Vec<Action>) {
         .open(&mut open)
         .show(ctx, |ui| {
         if let Some(problem) = &camera.problem {
-            ui.label(egui::RichText::new(problem).color(super::theme::RECORD_RED));
+            ui.label(egui::RichText::new(problem).color(super::theme::palette(ui).danger_text));
         }
         match &camera.preview {
             Some(texture) => {
@@ -34,7 +34,7 @@ pub fn window(ctx: &egui::Context, view: &View, actions: &mut Vec<Action>) {
             }
         }
         ui.horizontal(|ui| {
-            let take = ui.add_enabled(camera.preview.is_some(), egui::Button::new("Take photo"));
+            let take = super::widgets::primary_button(ui, super::icons::CAMERA, "Take the photo", camera.preview.is_some());
             if take.clicked() {
                 actions.push(Action::TakePhoto);
             }

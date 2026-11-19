@@ -1,4 +1,4 @@
-//! Freehand sketches (ADR-012): strokes drawn in the sketch window are
+//! Freehand sketches (ADR-013): strokes drawn in the sketch window are
 //! rasterized into a PNG with `tiny-skia`, so a sketch is stored and shown
 //! exactly like a photo.
 

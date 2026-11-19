@@ -3,7 +3,7 @@
 //! The current recording offset is *derived from the number of audio samples
 //! actually recorded*, not from a wall-clock timer. Pauses add no samples, so
 //! they add no time, and a note's offset always matches the audio file
-//! exactly (see ADR-005).
+//! exactly (see ADR-006).
 
 use std::fmt;
 

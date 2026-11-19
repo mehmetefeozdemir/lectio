@@ -13,11 +13,13 @@ pub enum LabelKind {
     Review,
     Task,
     Definition,
+    /// A note shown as a section title in the feed and the reading view.
+    Heading,
 }
 
 impl LabelKind {
-    pub const ALL: [LabelKind; 4] =
-        [LabelKind::Important, LabelKind::Review, LabelKind::Task, LabelKind::Definition];
+    pub const ALL: [LabelKind; 5] =
+        [LabelKind::Important, LabelKind::Review, LabelKind::Task, LabelKind::Definition, LabelKind::Heading];
 
     pub fn default_name(self) -> &'static str {
         match self {
@@ -25,6 +27,7 @@ impl LabelKind {
             Self::Review => "Review",
             Self::Task => "Task",
             Self::Definition => "Definition",
+            Self::Heading => "Heading",
         }
     }
 }

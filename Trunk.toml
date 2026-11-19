@@ -1,4 +1,4 @@
-# Web build (ADR-009): `trunk build --release` writes the site to dist/.
+# Web build (ADR-010): `trunk build --release` writes the site to dist/.
 [build]
 target = "index.html"
 dist = "dist"
