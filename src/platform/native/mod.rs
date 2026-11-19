@@ -1,0 +1,90 @@
+//! Windows, macOS and Linux: files on disk, `cpal` audio, `rfd` dialogs.
+
+mod player;
+mod recorder;
+
+use std::path::PathBuf;
+
+use lectio_core::material::BlobKey;
+use lectio_core::storage::{FileBlobStore, JsonFileStore, LibraryStore};
+
+pub use player::Player;
+pub use recorder::Recorder;
+
+use super::{AudioCapture, AudioError, AudioPlayback, FileKind, Pending, PickedFile, Platform};
+
+pub struct NativePlatform {
+    store: JsonFileStore,
+    blobs: FileBlobStore,
+}
+
+impl NativePlatform {
+    /// Uses `LECTIO_DATA_DIR` if set, else the OS app-data folder.
+    pub fn open() -> Self {
+        let dir = data_dir();
+        Self { store: JsonFileStore::new(&dir), blobs: FileBlobStore::new(&dir) }
+    }
+}
+
+impl Platform for NativePlatform {
+    fn store(&self) -> &dyn LibraryStore {
+        &self.store
+    }
+
+    fn start_capture(&self, file_name: &str) -> Result<Box<dyn AudioCapture>, AudioError> {
+        Ok(Box::new(Recorder::start(&self.store.audio_path(file_name))?))
+    }
+
+    fn open_playback(&self, file_name: &str) -> Result<Box<dyn AudioPlayback>, AudioError> {
+        Ok(Box::new(Player::open(&self.store.audio_path(file_name))?))
+    }
+
+    fn mic_help(&self) -> &'static str {
+        if cfg!(target_os = "macos") {
+            "Allow microphone access for the app you started Lectio from \
+             (System Settings > Privacy & Security > Microphone)."
+        } else if cfg!(target_os = "windows") {
+            "Allow desktop apps to use the microphone (Settings > Privacy & security > Microphone)."
+        } else {
+            "Check that a microphone is connected and set as the default input (PulseAudio/PipeWire settings)."
+        }
+    }
+
+    /// Opens the OS dialog and waits for it. That pauses drawing while the
+    /// dialog is open, but recording keeps going: audio runs on its own
+    /// threads (ADR-008). macOS requires dialogs on the main thread, which
+    /// is where egui calls us.
+    fn pick_file(&self, kind: FileKind) -> Pending<Option<PickedFile>> {
+        let (name, extensions) = kind.filter();
+        let Some(path) = rfd::FileDialog::new().add_filter(name, extensions).pick_file() else {
+            return Pending::ready(Ok(None));
+        };
+        let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        Pending::ready(
+            std::fs::read(&path)
+                .map(|bytes| Some(PickedFile { name: file_name, bytes }))
+                .map_err(|e| format!("Could not read {}: {e}", path.display())),
+        )
+    }
+
+    fn put_blob(&self, key: &BlobKey, bytes: Vec<u8>) -> Result<(), String> {
+        self.blobs.put(key, &bytes).map_err(|e| e.to_string())
+    }
+
+    fn get_blob(&self, key: &BlobKey) -> Pending<Vec<u8>> {
+        Pending::ready(self.blobs.get(key).map_err(|e| e.to_string()))
+    }
+
+    fn delete_blob(&self, key: &BlobKey) -> Result<(), String> {
+        self.blobs.delete(key).map_err(|e| e.to_string())
+    }
+}
+
+fn data_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("LECTIO_DATA_DIR") {
+        return PathBuf::from(dir);
+    }
+    directories::ProjectDirs::from("org", "Lectio", "Lectio")
+        .map(|dirs| dirs.data_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("lectio-data"))
+}

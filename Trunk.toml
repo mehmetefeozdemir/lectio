@@ -1,0 +1,6 @@
+# Web build (ADR-009): `trunk build --release` writes the site to dist/.
+[build]
+target = "index.html"
+dist = "dist"
+# Relative URLs, so the site also works from a sub-folder (e.g. GitHub Pages).
+public_url = "./"

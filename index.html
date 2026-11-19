@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Lectio</title>
+
+  <!-- trunk: build the `lectio` binary to WebAssembly, and copy the recording worklet next to it. -->
+  <link data-trunk rel="rust" data-bin="lectio" />
+  <link data-trunk rel="copy-file" href="web/lectio-capture-worklet.js" />
+
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #f7f7f7; }
+    @media (prefers-color-scheme: dark) { html, body { background: #1b1b1b; color: #eee; } }
+    canvas { display: block; width: 100%; height: 100%; outline: none; }
+    #lectio_status {
+      position: absolute; top: 40%; left: 0; right: 0; text-align: center;
+      font: 18px system-ui, sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="lectio_canvas"></canvas>
+  <p id="lectio_status" role="status">Loading Lectio…</p>
+  <noscript>Lectio needs JavaScript and WebAssembly to run.</noscript>
+</body>
+</html>

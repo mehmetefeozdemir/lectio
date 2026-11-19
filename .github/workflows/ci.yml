@@ -1,0 +1,120 @@
+# Lectio CI: build, test and lint on Windows, macOS and Linux, and build the web (WebAssembly) version.
+
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+
+jobs:
+  native:
+    name: native (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      # cpal needs the ALSA headers; egui/winit need xkbcommon, Wayland and
+      # the X11/XCB libraries to compile their Linux backends.
+      - name: Install Linux system packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libasound2-dev \
+            libxkbcommon-dev libwayland-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libgl1-mesa-dev
+
+      - name: Build
+        run: cargo build --workspace --locked
+
+      - name: Test (data model, seek logic, capture pipeline, storage, CLI)
+        run: cargo test --workspace --locked
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  web:
+    name: web (wasm32)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      - name: lectio-core compiles for the browser
+        run: cargo check -p lectio-core --target wasm32-unknown-unknown --locked
+
+      - name: The whole app compiles for the browser
+        run: cargo check --target wasm32-unknown-unknown --locked
+
+      - name: Lint (web)
+        run: cargo clippy --target wasm32-unknown-unknown --locked -- -D warnings
+
+      - name: Install trunk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+
+      - name: Build the web app (trunk)
+        run: trunk build --release
+
+      - name: Upload the web build
+        uses: actions/upload-artifact@v4
+        with:
+          name: lectio-web
+          path: dist
+          if-no-files-found: error
+
+      # Phase 2 browser flow (tools/web-smoke.mjs --flow phase2): import a PDF,
+      # record, note, sketch, fake-camera photo, reload, check IndexedDB.
+      # Advisory for now: it clicks fixed coordinates (PROBLEMS P-010) and has
+      # not yet proven stable on CI machines. Make it required once it has been
+      # green for a few runs.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # built-in WebSocket, used by the script
+
+      - name: Browser smoke test (Phase 2 flow, headless Chrome)
+        continue-on-error: true
+        run: |
+          python3 -m http.server 8765 --bind 127.0.0.1 --directory dist &
+          sleep 1
+          CHROME="$(command -v google-chrome)" node tools/web-smoke.mjs "http://127.0.0.1:8765/index.html" --flow phase2
+
+      - name: Upload the browser smoke-test screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-smoke-screenshots
+          path: shots/web-flow-*.png
+          if-no-files-found: ignore

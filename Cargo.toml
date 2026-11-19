@@ -1,0 +1,79 @@
+[package]
+name = "lectio"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Lectio: lecture notes timestamped to the audio (Phases 1-2: Capture, Material)"
+
+[workspace]
+members = ["crates/lectio-core"]
+
+# ---- every target: Windows, macOS, Linux and the web (ADR-009) ----
+[dependencies]
+lectio-core = { path = "crates/lectio-core" }
+# Default features: wgpu renderer (WebGPU, with a WebGL fallback in browsers)
+# and AccessKit for screen readers on desktop.
+eframe = "0.37"
+hound = "3.5"
+# Phase 2 (ADR-010, ADR-012): PDF slides, photos, sketches, file picking.
+hayro = "0.9"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+tiny-skia = "0.12"
+rfd = "0.18"
+
+# ---- native only: Windows, macOS, Linux ----
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+cpal = "0.18"
+directories = "6"
+rtrb = "0.4"
+
+# Same winit that eframe uses; needed only for the macOS "don't steal focus"
+# option used by --screenshot.
+[target.'cfg(target_os = "macos")'.dependencies]
+winit = "0.30"
+
+# ---- web only: the browser's microphone, Web Audio and IndexedDB ----
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "Location",
+    "Navigator",
+    "MediaDevices",
+    "MediaStream",
+    "MediaStreamTrack",
+    "MediaStreamConstraints",
+    "AudioContext",
+    "BaseAudioContext",
+    "AudioNode",
+    "AudioDestinationNode",
+    "AudioWorklet",
+    "Worklet",
+    "AudioWorkletNode",
+    "MediaStreamAudioSourceNode",
+    "MessagePort",
+    "MessageEvent",
+    "AudioBuffer",
+    "AudioBufferSourceNode",
+    "AudioScheduledSourceNode",
+    "IdbFactory",
+    "IdbOpenDbRequest",
+    "IdbRequest",
+    "IdbDatabase",
+    "IdbObjectStore",
+    "IdbTransaction",
+    "IdbTransactionMode",
+    "DomException",
+    "DomStringList",
+    # Phase 2: browser camera (ADR-012)
+    "HtmlVideoElement",
+    "HtmlMediaElement",
+    "CanvasRenderingContext2d",
+    "ImageData",
+    "Event",
+] }
