@@ -32,7 +32,8 @@ Icon=lectio
 Categories=Education;Office;
 Terminal=false
 DESKTOP
-cp assets/icon/lectio-icon.png "$OUT/lectio.png"
+# linuxdeploy accepts icons up to 512x512, so not the 1024 px master.
+cp assets/icon/lectio-icon-512.png "$OUT/lectio.png"
 
 if [ ! -x "$TOOLS/linuxdeploy" ]; then
   curl -sSfL -o "$TOOLS/linuxdeploy" "$LINUXDEPLOY_URL"

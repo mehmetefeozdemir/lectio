@@ -565,3 +565,10 @@ Every bug, dead end and wrong turn while building Lectio, with the root cause, w
 - **Root cause:** The disk wasn't full. `hdiutil create -srcfolder` estimates the image size from the folder on its own, and on GitHub's macOS runners that estimate is sometimes too small for the contents. This is a known, intermittent problem. The app is about 3× larger than a single-architecture build because it holds both Apple Silicon and Intel code, which makes a tight estimate more likely to miss.
 - **Fix:** `macos.sh` measures the staged folder with `du`, passes `-size` (folder plus 64 MB) and `-fs HFS+` itself, and retries up to three times. A retry also covers hdiutil's other intermittent error, "Resource busy".
 - **Lesson:** A packaging tool on CI can fail for reasons unrelated to the code. Read the last line before the error rather than assuming the build broke. Once the cause is known, make the step state its inputs explicitly instead of relying on the tool's guesses.
+
+## P-047: The AppImage step rejected the icon: `invalid x resolution: 1024`
+- **Phase:** 4b (first release)
+- **Symptom:** With the build moved to Ubuntu 24.04 (P-045), the Linux job compiled and linuxdeploy bundled the libraries, then stopped at "Deploying icons": `Icon dist-release/lectio.png has invalid x resolution: 1024`.
+- **Root cause:** linuxdeploy installs the icon into the freedesktop icon theme folders, which only go up to 512×512. The packaging script passed the 1024 px master icon that the macOS script uses to make its `.icns`.
+- **Fix:** Added `assets/icon/lectio-icon-512.png` (downscaled from the master) and the Linux script uses it.
+- **Lesson:** Each step of a release fails only once the step before it works, so release problems come one at a time. Running the release workflow by hand (`workflow_dispatch`, which builds but doesn't publish) let me fix them without moving the tag each time.
