@@ -91,7 +91,7 @@ pub fn gather(session: &Session) -> Vec<Source> {
         let kind = match note.kind {
             NoteKind::Slide => SourceKind::Slide,
             NoteKind::Text if note.is_heading() => SourceKind::Heading,
-            NoteKind::Text => SourceKind::Note,
+            NoteKind::Text | NoteKind::Math => SourceKind::Note,
         };
         items.push(source(kind, Some(note.offset_ms), note.slide, note.body.clone()));
         if let (NoteKind::Slide, Some(link)) = (note.kind, note.slide)

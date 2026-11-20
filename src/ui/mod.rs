@@ -10,6 +10,7 @@ mod camera;
 mod capture;
 mod composer;
 mod format;
+mod collections;
 mod home;
 pub mod icons;
 mod labels;
@@ -30,6 +31,8 @@ mod tasks;
 mod ai_settings;
 mod outline;
 mod define;
+mod formula;
+mod ink;
 pub mod widgets;
 mod workspace;
 
@@ -111,8 +114,21 @@ pub struct View<'a> {
     pub has_cleaned: bool,
     /// Phase 4a: AI study tools, quizzes, flashcards, tasks, focus, dictionary.
     pub study: StudyView<'a>,
+    /// Phase 4b: formula mode, paper view options, export progress, drawing tools.
+    pub paper: PaperView,
     /// Wall-clock time for due dates and the focus timer.
     pub now_ms: u64,
+}
+
+/// What the paper view, the input bar and the slide tools need (Phase 4b).
+pub struct PaperView {
+    pub formula_mode: bool,
+    pub options: lectio_core::paper::PaperOptions,
+    /// (format, pictures made, pictures needed) of a running export.
+    pub export: Option<(crate::platform::DocFormat, usize, usize)>,
+    pub ink: crate::app::InkState,
+    /// Printing works in this window.
+    pub can_print: bool,
 }
 
 /// What the study views need (Phase 4a).
@@ -196,6 +212,13 @@ pub struct Buffers {
     pub task_show_done: bool,
     /// Which session AI-written flashcards come from.
     pub card_session: Option<SessionId>,
+    /// Phase 4b: a new collection being named (`Some(Some(s))` = for session `s`).
+    pub adding_collection: Option<Option<SessionId>>,
+    pub new_collection: String,
+    /// A collection being renamed, and the text so far.
+    pub renaming_collection: Option<(lectio_core::CollectionId, String)>,
+    /// The stroke being drawn on a slide, in page fractions.
+    pub ink_stroke: Vec<[f32; 2]>,
 }
 
 impl Buffers {

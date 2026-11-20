@@ -20,7 +20,7 @@ pub use speech::run_cli as transcribe_cli;
 
 use eframe::egui;
 
-use super::{AudioCapture, AudioError, AudioPlayback, CaptureSource, FileKind, Pending, PickedFile, Platform};
+use super::{AudioCapture, AudioError, AudioPlayback, CaptureSource, DocFormat, FileKind, Pending, PickedFile, Platform};
 
 pub struct NativePlatform {
     store: JsonFileStore,
@@ -91,12 +91,23 @@ impl Platform for NativePlatform {
         }
     }
 
-    fn save_text_file(&self, suggested_name: &str, text: &str) -> Result<bool, String> {
-        let Some(path) = rfd::FileDialog::new().add_filter("Markdown", &["md"]).set_file_name(suggested_name).save_file()
-        else {
+    fn save_file(&self, suggested_name: &str, bytes: &[u8], format: DocFormat) -> Result<bool, String> {
+        let dialog = rfd::FileDialog::new().add_filter(format.name(), &[format.extension()]).set_file_name(suggested_name);
+        let Some(path) = dialog.save_file() else {
             return Ok(false);
         };
-        std::fs::write(&path, text).map(|()| true).map_err(|e| format!("Could not save {}: {e}", path.display()))
+        std::fs::write(&path, bytes).map(|()| true).map_err(|e| format!("Could not save {}: {e}", path.display()))
+    }
+
+    /// Writes the PDF to a temporary folder and opens it in the system's
+    /// viewer, where the user prints it (each OS has its own print dialog).
+    fn print(&self, title: &str, document: Vec<u8>) -> Result<(), String> {
+        let folder = std::env::temp_dir().join("lectio-print");
+        std::fs::create_dir_all(&folder).map_err(|e| format!("Could not prepare printing: {e}"))?;
+        let safe: String = title.chars().map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' }).collect();
+        let path = folder.join(format!("{}.pdf", safe.trim()));
+        std::fs::write(&path, document).map_err(|e| format!("Could not prepare printing: {e}"))?;
+        open_in_viewer(&path)
     }
 
     fn delete_blob(&self, key: &BlobKey) -> Result<(), String> {
@@ -174,6 +185,20 @@ fn capture_main_screen() -> Result<egui::ColorImage, String> {
 
 
 /// Where downloaded speech models are kept.
+/// Opens a file with the system's default app (the PDF viewer for printing).
+fn open_in_viewer(path: &std::path::Path) -> Result<(), String> {
+    let mut command = if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+    } else if cfg!(target_os = "windows") {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "start", ""]);
+        c
+    } else {
+        std::process::Command::new("xdg-open")
+    };
+    command.arg(path).spawn().map(|_| ()).map_err(|e| format!("Could not open the PDF viewer ({e}). The file is at {}.", path.display()))
+}
+
 pub fn models_dir() -> PathBuf {
     data_dir().join("models")
 }

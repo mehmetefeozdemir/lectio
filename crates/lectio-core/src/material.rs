@@ -130,7 +130,8 @@ impl std::fmt::Display for BlobKey {
 }
 
 /// An imported PDF. `page_count` is read once at import time.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// `PartialEq` only: its ink has float coordinates.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SlideDeck {
     pub id: DeckId,
     pub title: String,
@@ -140,6 +141,9 @@ pub struct SlideDeck {
     /// import; empty for decks imported before Phase 3 until it is extracted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub page_text: Vec<String>,
+    /// Drawing on the pages (Phase 4b, ADR-024); only pages with strokes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ink: Vec<crate::ink::PageInk>,
 }
 
 /// "This note is about page `page` (1-based) of deck `deck`."
@@ -214,7 +218,14 @@ impl Library {
         if page_count == 0 {
             return Err(ModelError::PageOutOfRange { page: 1, page_count });
         }
-        let deck = SlideDeck { id: DeckId::new_random(), title: deck_title(file_name), blob, page_count, page_text: Vec::new() };
+        let deck = SlideDeck {
+            id: DeckId::new_random(),
+            title: deck_title(file_name),
+            blob,
+            page_count,
+            page_text: Vec::new(),
+            ink: Vec::new(),
+        };
         let id = deck.id;
         let next = self.map_session(session, |s| {
             let mut changed = s.clone();
@@ -283,6 +294,9 @@ impl Library {
                 (crate::NoteKind::Slide, Some(link)) if trimmed.is_empty() => slide_title(link.page),
                 _ => trimmed.to_owned(),
             };
+            if n.kind == crate::NoteKind::Math {
+                crate::math::check(&body)?;
+            }
             let changed = crate::Note { body, ..n.clone() };
             if changed.has_content() { Ok(changed) } else { Err(ModelError::EmptyNote) }
         })

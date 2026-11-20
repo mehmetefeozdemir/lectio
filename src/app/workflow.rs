@@ -53,8 +53,7 @@ impl LectioApp {
             Action::SetPanel(panel, shown) => self.set_panel(panel, shown),
             Action::ShowTab(panel) => self.ui_state.narrow_tab = panel,
             Action::EditNoteText(note, text) => self.change_session(|lib, s| lib.with_note_text(s, note, &text)),
-            Action::CopyAll => self.ui_state.clipboard = self.session_markdown(),
-            Action::ExportMarkdown => self.export_markdown(),
+            Action::CopyAll => self.ui_state.clipboard = self.paper_markdown(),
             Action::SlideZoom(zoom) => self.ui_state.slide_zoom = zoom.clamp(MIN_ZOOM, MAX_ZOOM),
             Action::SetFullscreen(on) => self.ui_state.fullscreen = on,
             Action::SetTheme(theme) => {
@@ -67,7 +66,10 @@ impl LectioApp {
                     .apply_speech(other)
                     .and_then(|a| self.apply_audio(a))
                     .and_then(|a| self.apply_study(a))
-                    .and_then(|a| self.apply_organize(a));
+                    .and_then(|a| self.apply_organize(a))
+                    .and_then(|a| self.apply_paper(a))
+                    .and_then(|a| self.apply_ink(a))
+                    .and_then(|a| self.apply_collections(a));
                 if let Some(action) = rest {
                     self.apply_material(action);
                 }
@@ -159,23 +161,6 @@ impl LectioApp {
         }
     }
 
-    fn session_markdown(&self) -> Option<String> {
-        self.selected.and_then(|id| lectio_core::export::session_markdown(&self.library, id).ok())
-    }
-
-    fn export_markdown(&mut self) {
-        let text = self.session_markdown();
-        let title = self.selected.and_then(|id| self.library.session(id)).map(|s| s.title.clone());
-        let (Some(text), Some(title)) = (text, title) else { return };
-        let name = format!("{}.md", title.replace(['/', '\\', ':'], "-"));
-        let Some(platform) = self.platform.as_ref() else {
-            return self.show_error("Exporting is turned off in this window. Use \"Copy all\" instead.");
-        };
-        if let Err(e) = platform.save_text_file(&name, &text) {
-            self.show_error(e);
-        }
-    }
-
     /// Shows only the named panels (used for screenshots).
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub fn with_panels(mut self, panels: &str) -> Self {
@@ -197,6 +182,22 @@ impl LectioApp {
         self.ui_state.screen = Screen::Search;
         self.buffers.search = query.to_owned();
         self.run_search(query.to_owned());
+        self
+    }
+
+    /// Opens the paper view of the open session (used for screenshots).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub fn with_paper(mut self) -> Self {
+        self.material.reading = true;
+        self
+    }
+
+    /// Turns the slide drawing tools on (used for screenshots).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub fn with_ink_tools(mut self) -> Self {
+        self.ink.on = true;
+        // The sample drawing is on slide 2.
+        self.material.viewer.page = 2;
         self
     }
 

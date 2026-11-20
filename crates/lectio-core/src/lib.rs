@@ -6,6 +6,7 @@
 
 pub mod cards;
 pub mod clock;
+pub mod collections;
 pub mod dictionary;
 pub mod dsp;
 mod error;
@@ -13,8 +14,11 @@ mod ids;
 mod labels;
 pub mod export;
 pub mod focus;
+pub mod ink;
+pub mod math;
 pub mod material;
 pub mod outline;
+pub mod paper;
 mod model;
 pub mod prefs;
 pub mod prompts;
@@ -32,7 +36,7 @@ pub mod trash;
 pub mod transcript;
 
 pub use error::ModelError;
-pub use ids::{CardId, CourseId, DeckId, NoteId, SessionId};
+pub use ids::{CardId, CollectionId, CourseId, DeckId, NoteId, SessionId};
 pub use labels::{Label, LabelKind, LabelSet};
 pub use model::{Course, Library, Note, NoteKind, Recording, SCHEMA_VERSION, Session};
 

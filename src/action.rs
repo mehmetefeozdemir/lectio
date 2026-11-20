@@ -10,7 +10,11 @@ use lectio_core::prefs::{AiProvider, SpeechModel};
 
 use crate::platform::CaptureSource;
 use lectio_core::material::SlideLink;
-use lectio_core::{CourseId, DeckId, LabelKind, NoteId, SessionId};
+use lectio_core::collections::{HomeFilter, SessionSort};
+use lectio_core::ink::InkColor;
+use lectio_core::{CollectionId, CourseId, DeckId, LabelKind, NoteId, SessionId};
+
+use crate::platform::DocFormat;
 
 /// Top-level screens (ADR-015).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -32,6 +36,8 @@ pub enum Screen {
 pub enum QuizScope {
     Session(SessionId),
     Course(CourseId),
+    /// A user-defined collection (Phase 4b).
+    Collection(CollectionId),
 }
 
 /// A quiz answer as given.
@@ -112,7 +118,6 @@ pub enum Action {
     ShowTab(Panel),
     EditNoteText(NoteId, String),
     CopyAll,
-    ExportMarkdown,
     SlideZoom(f32),
     SetFullscreen(bool),
 
@@ -176,4 +181,38 @@ pub enum Action {
     CloseLookUp,
     DownloadDictionary,
     SetOnlineDictionary(bool),
+
+    // ---- Phase 4b: polish and ship (ADR-023 to ADR-026) ----
+    /// The input bar takes LaTeX and saves formula notes.
+    SetFormulaMode(bool),
+    SetPaperTimes(bool),
+    SetPaperTranscript(bool),
+    /// Writes the open session's paper view as a file.
+    Export(DocFormat),
+    Print,
+    /// Drawing on the slide panel's page.
+    SetInking(bool),
+    SetInkTool(InkPen),
+    SetInkColor(InkColor),
+    AddInkStroke { deck: DeckId, page: u32, points: Vec<[f32; 2]> },
+    EraseInk { deck: DeckId, page: u32, at: [f32; 2] },
+    UndoInk { deck: DeckId, page: u32 },
+    ClearInk { deck: DeckId, page: u32 },
+    /// A new collection, with this session in it if given.
+    NewCollection { name: String, with: Option<SessionId> },
+    RenameCollection(CollectionId, String),
+    DeleteCollection(CollectionId),
+    AddToCollection { collection: CollectionId, session: SessionId },
+    RemoveFromCollection { collection: CollectionId, session: SessionId },
+    SetHomeFilter(HomeFilter),
+    SetHomeSort(SessionSort),
+}
+
+/// The drawing tool on a slide (Phase 4b, ADR-024).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InkPen {
+    #[default]
+    Pen,
+    Highlighter,
+    Eraser,
 }

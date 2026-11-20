@@ -29,3 +29,4 @@ id_type!(SessionId);
 id_type!(NoteId);
 id_type!(DeckId);
 id_type!(CardId);
+id_type!(CollectionId);

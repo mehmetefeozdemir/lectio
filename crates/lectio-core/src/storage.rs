@@ -63,7 +63,8 @@ pub trait LibraryStore {
 /// What a saved library text turned out to be.
 #[derive(Debug, PartialEq)]
 pub enum SavedData {
-    Valid(Library),
+    /// Boxed: a library is much bigger than the other variants.
+    Valid(Box<Library>),
     /// Written by a newer Lectio: valid data we can't read. Never overwrite it.
     Newer(ModelError),
     /// Damaged: move it aside and start fresh.
@@ -73,7 +74,7 @@ pub enum SavedData {
 /// The one rule every store follows for saved text.
 pub fn interpret_saved(text: &str) -> SavedData {
     match Library::from_json(text) {
-        Ok(library) => SavedData::Valid(library),
+        Ok(library) => SavedData::Valid(Box::new(library)),
         Err(e @ ModelError::UnsupportedSchema { .. }) => SavedData::Newer(e),
         Err(_) => SavedData::Unreadable,
     }
@@ -124,7 +125,7 @@ impl LibraryStore for JsonFileStore {
             Err(source) => return Err(StoreError::Io { path, source }),
         };
         match interpret_saved(&text) {
-            SavedData::Valid(library) => Ok(LoadOutcome { library, recovered_from: None }),
+            SavedData::Valid(library) => Ok(LoadOutcome { library: *library, recovered_from: None }),
             // A newer app's file is valid data we can't read: never touch it.
             SavedData::Newer(e) => Err(StoreError::Model(e)),
             SavedData::Unreadable => {

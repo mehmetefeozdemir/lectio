@@ -11,7 +11,11 @@ mod audio_actions;
 mod speech_actions;
 mod study_actions;
 mod organize_actions;
+mod collection_actions;
+mod ink_actions;
+mod paper_actions;
 
+pub use ink_actions::InkState;
 pub use organize_actions::LookUpState;
 pub use study_actions::{QuizRun, ReviewRun};
 
@@ -85,6 +89,10 @@ pub struct LectioApp {
     study: study_actions::StudyState,
     /// Phase 4a: tasks, the focus timer, dictionary look-ups.
     organize: organize_actions::OrganizeState,
+    /// Phase 4b (ADR-023, ADR-025): formula mode, paper view options, exports.
+    paper: paper_actions::PaperState,
+    /// Phase 4b (ADR-024): the slide drawing tools.
+    ink: ink_actions::InkState,
     #[cfg(not(target_arch = "wasm32"))]
     screenshot: Option<crate::screenshot::ScreenshotDriver>,
 }
@@ -136,6 +144,8 @@ impl LectioApp {
             speech: speech_actions::SpeechState::default(),
             study: study_actions::StudyState::default(),
             organize: organize_actions::OrganizeState::default(),
+            paper: paper_actions::PaperState::default(),
+            ink: ink_actions::InkState::default(),
             #[cfg(not(target_arch = "wasm32"))]
             screenshot: None,
         }
@@ -260,6 +270,16 @@ impl LectioApp {
                 .and_then(|s| s.recording.as_ref())
                 .is_some_and(|r| r.cleaned_file.is_some()),
             study: self.study_view(),
+            paper: ui::PaperView {
+                formula_mode: self.paper.formula_mode,
+                options: self.paper.options,
+                export: self.paper.job.as_ref().map(|j| {
+                    let (done, total) = j.progress();
+                    (j.format(), done, total)
+                }),
+                ink: self.ink,
+                can_print: self.platform.is_some() && self.can_save,
+            },
             now_ms: now_unix_ms(),
         }
     }
@@ -451,7 +471,12 @@ impl LectioApp {
         let Some(session) = self.selected.filter(|_| self.can_take_notes()) else { return };
         let offset = self.draft.anchor_ms(self.current_offset_ms());
         let body = self.draft.text().to_owned();
-        let added = self.library.with_note(session, offset, &body, labels);
+        // Formula mode (ADR-023): typed text is LaTeX; a label alone is still a moment.
+        let added = if self.paper.formula_mode && !body.trim().is_empty() {
+            self.library.with_math_note(session, offset, &body, labels)
+        } else {
+            self.library.with_note(session, offset, &body, labels)
+        };
         if self.adopt_new_note(session, added) {
             self.draft = NoteDraft::default();
         }
@@ -641,7 +666,8 @@ impl LectioApp {
             | self.tick_cleaning()
             | self.tick_screenshot(ctx)
             | self.tick_study()
-            | self.tick_organize();
+            | self.tick_organize()
+            | self.tick_paper();
         self.tick_ui_state(now);
         let loading = self.playback.as_ref().and_then(|p| p.player.as_ref()).is_some_and(|p| !p.is_ready());
         if self.is_recording_active() || self.view().playing || loading || material_busy {

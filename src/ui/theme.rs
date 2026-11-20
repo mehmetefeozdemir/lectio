@@ -207,10 +207,10 @@ pub fn theme_name(preference: ThemePreference) -> &'static str {
 fn fonts() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     let data = |bytes: &'static [u8]| Arc::new(FontData::from_static(bytes));
-    fonts.font_data.insert(FONT_INTER.into(), data(include_bytes!("../../assets/fonts/Inter-Regular.ttf")));
-    fonts.font_data.insert(FONT_INTER_SEMIBOLD.into(), data(include_bytes!("../../assets/fonts/Inter-SemiBold.ttf")));
-    fonts.font_data.insert(FONT_MONO.into(), data(include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf")));
-    fonts.font_data.insert(FONT_ICONS.into(), data(include_bytes!("../../assets/fonts/Phosphor.ttf")));
+    fonts.font_data.insert(FONT_INTER.into(), data(crate::media::fonts::INTER_REGULAR));
+    fonts.font_data.insert(FONT_INTER_SEMIBOLD.into(), data(crate::media::fonts::INTER_SEMIBOLD));
+    fonts.font_data.insert(FONT_MONO.into(), data(crate::media::fonts::MONO));
+    fonts.font_data.insert(FONT_ICONS.into(), data(crate::media::fonts::ICONS));
     // Icons get their own family. They can't share a fallback list with
     // Inter: Inter has glyphs at some of the private-use codepoints Phosphor
     // uses, and Phosphor has glyphs for some Latin letters, so whichever font
@@ -363,6 +363,19 @@ mod tests {
             }
             let plain = contrast_ratio(p.marker, p.surface);
             assert!(plain >= AA_GRAPHICS, "plain marker (dark={dark}): {plain:.2}");
+        }
+    }
+
+    /// Phase 4b: pen strokes on a slide (white paper) must stand out like any
+    /// other graphic. Yellow is the highlighter's colour (drawn see-through
+    /// over text), so it is the one exception.
+    #[test]
+    fn pen_ink_stands_out_on_slide_paper() {
+        use lectio_core::ink::InkColor;
+        for color in InkColor::ALL.into_iter().filter(|c| *c != InkColor::Yellow) {
+            let [r, g, b] = color.rgb();
+            let ratio = contrast_ratio(Color32::from_rgb(r, g, b), LIGHT.paper);
+            assert!(ratio >= AA_GRAPHICS, "{color:?} ink on paper: {ratio:.2}");
         }
     }
 

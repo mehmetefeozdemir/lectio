@@ -6,6 +6,7 @@
 //! async work with `spawn_local` and the app polls for the result
 //! (`is_ready`, `take_error`, `take_background_error`) on later frames.
 
+pub mod a11y;
 mod ai;
 mod camera;
 mod dictionary;
@@ -170,12 +171,12 @@ impl Platform for WebPlatform {
         Ok(())
     }
 
-    /// Offers the text as a download: a temporary `blob:` URL on an `<a download>`.
-    fn save_text_file(&self, suggested_name: &str, text: &str) -> Result<bool, String> {
+    /// Offers the file as a download: a temporary `blob:` URL on an `<a download>`.
+    fn save_file(&self, suggested_name: &str, bytes: &[u8], format: super::DocFormat) -> Result<bool, String> {
         let document = web_sys::window().and_then(|w| w.document()).ok_or("no document")?;
-        let parts = js_sys::Array::of1(&JsValue::from_str(text));
+        let parts = js_sys::Array::of1(&Uint8Array::from(bytes));
         let options = web_sys::BlobPropertyBag::new();
-        options.set_type("text/markdown");
+        options.set_type(format.mime());
         let blob = web_sys::Blob::new_with_str_sequence_and_options(&parts, &options).map_err(js_err)?;
         let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(js_err)?;
         let link: web_sys::HtmlAnchorElement =
@@ -185,6 +186,36 @@ impl Platform for WebPlatform {
         link.click();
         let _ = web_sys::Url::revoke_object_url(&url);
         Ok(true)
+    }
+
+    fn print_format(&self) -> super::DocFormat {
+        super::DocFormat::Html
+    }
+
+    /// Loads the document's HTML into a hidden frame and opens the
+    /// browser's print dialog for that frame only (ADR-025).
+    fn print(&self, _title: &str, document: Vec<u8>) -> Result<(), String> {
+        const FRAME_ID: &str = "lectio_print";
+        let html = String::from_utf8(document).map_err(|_| "The document to print is not valid text.")?;
+        let page = web_sys::window().and_then(|w| w.document()).ok_or("no document")?;
+        if let Some(old) = page.get_element_by_id(FRAME_ID) {
+            old.remove();
+        }
+        let frame: web_sys::HtmlIFrameElement =
+            page.create_element("iframe").map_err(js_err)?.dyn_into().map_err(|_| "no <iframe> element")?;
+        frame.set_id(FRAME_ID);
+        frame.set_attribute("aria-hidden", "true").map_err(js_err)?;
+        frame.set_attribute("style", "position:fixed;right:0;bottom:0;width:0;height:0;border:0").map_err(js_err)?;
+        let printed = frame.clone();
+        let on_load = wasm_bindgen::closure::Closure::once_into_js(move || {
+            if let Some(window) = printed.content_window() {
+                let _ = window.print();
+            }
+        });
+        frame.set_onload(Some(on_load.unchecked_ref()));
+        frame.set_srcdoc(&html);
+        page.body().ok_or("no page body")?.append_child(&frame).map_err(js_err)?;
+        Ok(())
     }
 
     fn delete_blob(&self, key: &BlobKey) -> Result<(), String> {

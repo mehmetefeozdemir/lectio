@@ -103,6 +103,7 @@ fn scope_label(library: &Library, scope: QuizScope) -> String {
     match scope {
         QuizScope::Session(s) => library.session(s).map_or("?".into(), |s| format!("Session: {}", s.title)),
         QuizScope::Course(c) => library.course(c).map_or("?".into(), |c| format!("Whole course: {}", c.name)),
+        QuizScope::Collection(id) => library.collection(id).map_or("?".into(), |c| format!("Collection: {}", c.name)),
     }
 }
 
@@ -119,6 +120,13 @@ fn quiz_setup(ui: &mut egui::Ui, view: &View, buffers: &mut Buffers, actions: &m
     };
     ui.horizontal_wrapped(|ui| {
         let combo = egui::ComboBox::from_id_salt("quiz-scope").selected_text(scope_label(library, scope)).show_ui(ui, |ui| {
+            for collection in library.collections() {
+                let whole = QuizScope::Collection(collection.id);
+                if ui.selectable_label(scope == whole, scope_label(library, whole)).clicked() {
+                    buffers.quiz_scope = Some(whole);
+                    buffers.quiz_topics.clear();
+                }
+            }
             for course in library.courses() {
                 let whole = QuizScope::Course(course.id);
                 if ui.selectable_label(scope == whole, scope_label(library, whole)).clicked() {
@@ -172,6 +180,7 @@ fn topic_choices(ui: &mut egui::Ui, library: &Library, scope: QuizScope, buffers
     let sessions: Vec<_> = match scope {
         QuizScope::Session(s) => library.session(s).into_iter().collect(),
         QuizScope::Course(c) => library.live_sessions().into_iter().filter(|(co, _)| co.id == c).map(|(_, s)| s).collect(),
+        QuizScope::Collection(id) => library.collection_sessions(id).into_iter().filter_map(|s| library.session(s)).collect(),
     };
     let titles: Vec<String> = sessions.iter().flat_map(|s| topics(s)).map(|t| t.title).collect();
     if titles.is_empty() {

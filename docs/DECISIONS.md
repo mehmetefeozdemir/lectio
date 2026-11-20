@@ -563,3 +563,101 @@
 - **Consequences:** English only; the attribution "Open English WordNet (CC BY 4.0)" is shown with every offline result.
   In the browser the index is built by a short-lived copy of the worker (so the page doesn't freeze while 49 MB of JSON is
   read) and kept in IndexedDB; it is read into memory on the first look-up.
+
+## ADR-023: Math notes: my own layout engine for a LaTeX subset, drawn with an open math font
+- **Date:** 2026-11-20
+- **Status:** accepted (written before the code)
+- **Context:** Students need formulas in their notes (`\frac{n(n+1)}{2}`). The spec asks for LaTeX input with a live preview,
+  rendered in the feed, the paper view and every export, on all four targets, preferably in pure Rust.
+- **Options considered:**
+
+  | option | pure Rust / browser | size | fits egui + PDF + DOCX | notes |
+  |---|---|---|---|---|
+  | KaTeX or MathJax through an embedded JavaScript engine | no (C engine or the page's JS) | +1–3 MB | needs a second renderer for egui | best coverage, but two code paths and a JS engine on the desktop |
+  | Typst's math engine | yes | +10 MB, large API | yes, but brings a whole typesetting system | far more than notes need |
+  | `latex2mathml` / `pulldown-latex` | yes | small | only produce MathML; egui can't draw MathML | good for HTML only |
+  | **own parser + box layout for a LaTeX subset (chosen)** | yes | ~1 k lines + a 1 MB font | one layout, drawn by every output | limited to what students write in notes |
+- **Decision:** `lectio_core::math` parses the common subset (letters, numbers, operators, Greek letters and about 110
+  symbols, `^`, `_`, `\frac`, `\sqrt[n]{}`, `\text{}`, `\mathbf{}`, `\left( … \right)`, `\overline`, accents, `\sum`/`\prod`/
+  `\int`/`\lim` with limits, `\binom`) into a tree and lays it out as boxes (TeX's idea: every piece has a width, a height above
+  the baseline and a depth below). The layout only needs glyph widths, so it is tested in `lectio-core` with fake metrics. The
+  app turns the laid-out glyphs and rules into an image with the bundled **Noto Sans Math** (SIL OFL), for the feed, paper
+  view, PDF and DOCX; Markdown keeps the LaTeX source between `$$`. Anything outside the subset is an error shown in the live
+  preview, never a wrong picture.
+- **Consequences:** no macros, matrices or alignment environments yet (`\begin{…}` is reported as not supported). The
+  formula is a picture in exports (the LaTeX source is its alt text), so it isn't searchable inside a PDF; it is searchable in
+  Lectio because the note stores the source.
+
+## ADR-024: Slide annotations: vector strokes per page, normalised to the page
+- **Date:** 2026-11-20
+- **Status:** accepted
+- **Context:** Draw, highlight and erase on a slide page, shown in the slides panel, the paper view and exports.
+- **Options considered:** (1) save a PNG per annotated page (simple, but loses quality when zoomed, makes erasing a pixel
+  operation, and adds a blob per page); (2) edit the PDF (complex, and the original file should stay as imported); (3)
+  **strokes as point lists in `library.json` (chosen)**.
+- **Decision:** each `SlideDeck` gets `ink: Vec<PageInk>`; a `PageInk` is a page number and its strokes. A stroke is a tool
+  (pen or highlighter), a colour from a fixed palette, a width, and points with coordinates from 0 to 1 across the page, so
+  the same strokes fit any zoom or export size. Points are rounded to 1/10 000 (finer than a pixel on a 4K screen) to keep
+  the file small. The eraser removes whole strokes that pass within its radius (like a whiteboard eraser, and easy to undo).
+  Limits: 2 000 points per stroke, 500 strokes per page.
+- **Consequences:** schema version 6. Drawing is drawn by egui on top of the page; exports draw the same strokes with
+  tiny-skia onto the rendered page.
+
+## ADR-025: Paper view and exports: one document model, three writers (Markdown, PDF with krilla, DOCX by hand)
+- **Date:** 2026-11-20
+- **Status:** accepted
+- **Context:** A document-style view of a session with slides inline, plus Copy, Print, and export to Markdown, PDF and DOCX
+  on every target.
+- **Options considered (PDF):** `printpdf` (big API changes between versions), `pdf-writer` (low level: fonts and text
+  layout by hand), **krilla** (high-level, pure Rust, embeds and subsets fonts, images and vector paths; chosen).
+  **(DOCX):** `docx-rs` (many dependencies), **writing the Office Open XML by hand into a zip (chosen)**: a .docx is a zip of
+  a few XML files, and the part I need (headings, paragraphs, images) is about 200 lines that I can test.
+  **(Print):** native print dialogs differ on every OS; instead the desktop writes the PDF and opens it in the system viewer,
+  and the browser prints an HTML version of the document from a hidden frame.
+- **Decision:** `lectio_core::paper` turns a session into a list of blocks (title, heading, note, formula, slide, image,
+  transcript excerpt), with each slide shown once, before the first note about it. A new crate `lectio-export` (pure Rust,
+  no UI) writes the blocks as Markdown, HTML, PDF and DOCX, given the pictures (slide pages with their ink, photos, sketches,
+  formulas) as PNG bytes, which the app renders first, one per frame so the window stays responsive.
+- **Consequences:** exports are the same on all targets and testable without a window. PDF text is real text (selectable,
+  searchable) in Inter; formulas and slides are images.
+
+## ADR-026: Collections across courses; filter and sort on Home
+- **Date:** 2026-11-20
+- **Status:** accepted
+- **Context:** Group sessions across courses (e.g. "Midterm 1"), and filter and sort the Home list.
+- **Decision:** `Library.collections`: a name and an ordered list of session ids. A session can be in many collections;
+  removing a session for good removes it from them; trashed sessions are hidden but kept. Home has a filter (all, one
+  course, one collection, or one label) and a sort (newest, oldest, title, longest), saved in the preferences.
+  "Quiz me" can now use a whole collection.
+- **Options considered:** tags on sessions (simpler, but a collection's order and name couldn't be edited in one place);
+  nested folders (more than the spec asks).
+
+## ADR-027: Screen readers on the web: a DOM mirror of egui's AccessKit tree
+- **Date:** 2026-11-20
+- **Status:** accepted (fixes P-013)
+- **Context:** egui draws into one `<canvas>`; on the desktop eframe hands its AccessKit tree to the OS, but in the browser
+  eframe 0.37 throws that tree away ("not currently implemented"), so screen readers find nothing.
+- **Options considered:** eframe's `web_screen_reader` feature (it only speaks text through speech synthesis; a screen reader
+  user can't navigate it); rewriting the web UI in HTML (a second UI); **an egui plugin that mirrors the tree into the DOM
+  (chosen)**.
+- **Decision:** a plugin (`platform/web/a11y.rs`) turns on AccessKit and, in egui's `output_hook`, receives the tree every
+  frame. It keeps one element per node in an invisible overlay above the canvas (`opacity: 0`, `pointer-events: none`, so
+  the mouse still reaches egui), positioned like the widget so a screen reader's highlight lands in the right place, with
+  the matching role (`button`, `checkbox`, `heading`, `textbox`…), name, value and state, and only touches elements that
+  changed. (My first plan put the elements inside the `<canvas>` as "fallback content"; fallback content gets no layout
+  boxes, so a screen reader's cursor would have no position to show.) Activating a mirrored control (for example VoiceOver's VO-Space) becomes an AccessKit
+  `Click` request that the plugin's `input_hook` gives back to egui; typing into a mirrored text field becomes `SetValue`.
+  Focus changes are announced in a polite live region.
+- **Consequences:** the browser test can check the accessibility tree again (`--expect-ax`). The mirror follows egui's
+  frames, so very fast changes (a timer) are announced only when the user moves to them.
+
+## ADR-028: Proof on platforms I can't test by hand, and releases from tags
+- **Date:** 2026-11-20
+- **Status:** accepted
+- **Decision:** CI runs the desktop app's `--screenshot` mode on Linux (under `xvfb`, Mesa's software renderer) and Windows
+  (the WARP software adapter) and uploads the pictures; on Linux it also runs `--self-test-audio` against a PulseAudio null
+  sink. A `release.yml` workflow on `v*` tags builds a universal macOS `.dmg`, a Windows `.zip` and `.msi`, a Linux AppImage
+  and the web build as a zip, and attaches them to a GitHub release. Signing happens only when the signing secrets exist
+  (Apple Developer ID / notarisation; a Windows code-signing certificate); otherwise the artifacts are unsigned and the
+  install guide says how to open them.
+- **Consequences:** the new CI steps start as advisory (they don't fail the build) until they have been green a few times.

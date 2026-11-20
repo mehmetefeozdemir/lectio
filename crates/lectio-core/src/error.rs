@@ -22,6 +22,9 @@ pub enum ModelError {
     NoRecording,
     NotATask,
     InvalidStudyItem(String),
+    CollectionNotFound,
+    InvalidInk(String),
+    InvalidFormula(String),
 }
 
 impl fmt::Display for ModelError {
@@ -53,6 +56,9 @@ impl fmt::Display for ModelError {
             Self::NoRecording => write!(f, "This session has no recording yet."),
             Self::NotATask => write!(f, "Only notes labelled Task can be marked done or given a due date."),
             Self::InvalidStudyItem(why) => write!(f, "{why}"),
+            Self::CollectionNotFound => write!(f, "That collection no longer exists."),
+            Self::InvalidInk(why) => write!(f, "{why}"),
+            Self::InvalidFormula(why) => write!(f, "The formula can't be read: {why}"),
         }
     }
 }

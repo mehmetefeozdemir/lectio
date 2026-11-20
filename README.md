@@ -24,7 +24,13 @@ One Rust codebase runs as a native app on **Windows, macOS and Linux** and as a 
 - [x] Optional AI study tools: a small model on the device, Ollama, or an OpenAI-compatible endpoint with your own key. Every item cites the moment it came from
 - [x] Outline, Quiz me (with an offline fill-in-the-blank mode), flashcards with spaced repetition
 - [x] Tasks across courses, focus timer, dictionary look-ups (offline WordNet)
-- [ ] Formula notes, slide annotation, PDF/DOCX export, collections, full screen-reader support on the web, release builds
+- [x] Formula notes (LaTeX) with live preview; drawing and highlighting on slides
+- [x] Paper view with Copy, Print, and PDF / Word / Markdown export
+- [x] Collections across courses, with filter and sort
+- [x] Screen-reader support on desktop and web (accessible names, keyboard focus order)
+
+## Install
+Prebuilt installers for macOS, Windows, Linux and the web are attached to each [GitHub release](../../releases). See [docs/README.md](docs/README.md) for how to install and open each one.
 
 ## Build and run
 Requires a recent stable Rust toolchain.
@@ -60,7 +66,6 @@ The design is written up in the open:
 | [docs/PROBLEMS.md](docs/PROBLEMS.md) | Bugs and dead ends, with the root cause and the fix |
 
 ## Known limitations
-- The web version draws to a canvas, so screen readers can't read it yet (see PROBLEMS). The desktop app supports screen readers.
 - Local AI and transcription models are downloaded on first use (about 150 MB to 1 GB each, depending on the model).
 - Linux and Windows are verified in CI. Day-to-day testing is on macOS.
 

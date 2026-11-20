@@ -66,6 +66,9 @@ pub struct Preferences {
     pub ai: AiProvider,
     /// Look words up online when the offline dictionary has nothing (ADR-022).
     pub online_dictionary: bool,
+    /// What the Home list shows, and in which order (Phase 4b, ADR-026).
+    pub home_filter: crate::collections::HomeFilter,
+    pub home_sort: crate::collections::SessionSort,
 }
 
 impl Default for Preferences {
@@ -85,6 +88,8 @@ impl Default for Preferences {
             show_outline_tab: false,
             ai: AiProvider::None,
             online_dictionary: false,
+            home_filter: crate::collections::HomeFilter::default(),
+            home_sort: crate::collections::SessionSort::default(),
         }
     }
 }

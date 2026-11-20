@@ -4,6 +4,7 @@
 //! workspace.
 
 use eframe::egui::{self, CornerRadius, Key, RichText, Role, Sense, Stroke};
+use lectio_core::collections::{HomeFilter, SessionSort};
 use lectio_core::trash::TRASH_DAYS;
 use lectio_core::{Course, LabelKind, Session};
 
@@ -19,7 +20,7 @@ pub const LABEL_ORDER: [LabelKind; 5] =
 
 pub fn show(ui: &mut egui::Ui, view: &View, buffers: &mut Buffers, actions: &mut Vec<Action>) {
     match view.screen {
-        Screen::Collections => collections(ui, view, buffers, actions),
+        Screen::Collections => super::collections::page(ui, view, buffers, actions),
         Screen::Trash => trash(ui, view, actions),
         Screen::Tasks => super::tasks::page(ui, view, buffers, actions),
         Screen::Study => super::study::page(ui, view, buffers, actions),
@@ -41,7 +42,9 @@ pub(super) fn page_title(ui: &mut egui::Ui, title: &str, detail: &str, right: im
 }
 
 fn home(ui: &mut egui::Ui, view: &View, buffers: &mut Buffers, actions: &mut Vec<Action>) {
-    let sessions = view.library.live_sessions();
+    let (filter, sort) = (view.prefs.home_filter, view.prefs.home_sort);
+    let any_sessions = !view.library.live_sessions().is_empty();
+    let sessions = view.library.home_sessions(&filter, sort);
     let detail = match sessions.len() {
         1 => "1 session".to_owned(),
         n => format!("{n} sessions"),
@@ -64,16 +67,69 @@ fn home(ui: &mut egui::Ui, view: &View, buffers: &mut Buffers, actions: &mut Vec
         first_course(ui, buffers, actions);
         return;
     }
-    if sessions.is_empty() {
+    if !any_sessions {
         let message = "Press \"New session\", then record the lecture and take notes as it goes.";
         widgets::empty_state(ui, icons::MICROPHONE, "No sessions yet", message, None);
         return;
     }
+    filter_bar(ui, view, filter, sort, actions);
+    if buffers.adding_collection.is_some_and(|with| with.is_some()) {
+        super::collections::new_collection_field(ui, buffers, actions);
+        ui.add_space(space::S);
+    }
+    if sessions.is_empty() {
+        let shown = widgets::empty_state(ui, icons::FILTER, "No sessions match", "Nothing here matches this filter.", Some((icons::CLOSE, "Show all sessions")));
+        if shown {
+            actions.push(Action::SetHomeFilter(HomeFilter::All));
+        }
+        return;
+    }
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         for (course, session) in sessions {
-            session_card(ui, view, course, session, actions);
+            session_card(ui, view, course, session, buffers, actions);
         }
     });
+}
+
+/// What a filter is called in the menu.
+fn filter_name(view: &View, filter: HomeFilter) -> String {
+    match filter {
+        HomeFilter::All => "All sessions".into(),
+        HomeFilter::Course(id) => view.library.course(id).map_or("A course".into(), |c| format!("Course: {}", c.name)),
+        HomeFilter::Collection(id) => view.library.collection(id).map_or("A collection".into(), |c| format!("Collection: {}", c.name)),
+        HomeFilter::Label(kind) => format!("Has a note labelled {}", view.library.labels().name(kind)),
+    }
+}
+
+/// Show: all / one course / one collection / one label · Sort (ADR-026).
+fn filter_bar(ui: &mut egui::Ui, view: &View, filter: HomeFilter, sort: SessionSort, actions: &mut Vec<Action>) {
+    let p = palette(ui);
+    let mut choices = vec![HomeFilter::All];
+    choices.extend(view.library.courses().iter().map(|c| HomeFilter::Course(c.id)));
+    choices.extend(view.library.collections().iter().map(|c| HomeFilter::Collection(c.id)));
+    choices.extend(LABEL_ORDER.into_iter().filter(|k| *k != LabelKind::Heading).map(HomeFilter::Label));
+    ui.horizontal_wrapped(|ui| {
+        ui.label(widgets::icon(icons::FILTER, size::ICON, p.text_muted));
+        let combo = egui::ComboBox::from_id_salt("home-filter").selected_text(filter_name(view, filter)).show_ui(ui, |ui| {
+            for choice in choices {
+                if ui.selectable_label(choice == filter, filter_name(view, choice)).clicked() {
+                    actions.push(Action::SetHomeFilter(choice));
+                }
+            }
+        });
+        widgets::name(&combo.response, Role::ComboBox, "Show sessions");
+        ui.add_space(space::S);
+        ui.label(widgets::icon(icons::SORT, size::ICON, p.text_muted));
+        let combo = egui::ComboBox::from_id_salt("home-sort").selected_text(sort.name()).show_ui(ui, |ui| {
+            for choice in SessionSort::ALL {
+                if ui.selectable_label(choice == sort, choice.name()).clicked() {
+                    actions.push(Action::SetHomeSort(choice));
+                }
+            }
+        });
+        widgets::name(&combo.response, Role::ComboBox, "Sort sessions");
+    });
+    ui.add_space(space::S);
 }
 
 /// "3 cards due" next to "New session" (Phase 4a); opens the Study page.
@@ -146,7 +202,14 @@ pub fn new_course_field(ui: &mut egui::Ui, buffers: &mut Buffers, actions: &mut 
 
 /// One session: title, course · date · length, and how many notes carry
 /// each label. Click to open; "⋯" to move it to the trash.
-fn session_card(ui: &mut egui::Ui, view: &View, course: &Course, session: &Session, actions: &mut Vec<Action>) {
+pub(super) fn session_card(
+    ui: &mut egui::Ui,
+    view: &View,
+    course: &Course,
+    session: &Session,
+    buffers: &mut Buffers,
+    actions: &mut Vec<Action>,
+) {
     let p = palette(ui);
     let frame = egui::Frame::new()
         .fill(p.surface)
@@ -162,7 +225,7 @@ fn session_card(ui: &mut egui::Ui, view: &View, course: &Course, session: &Sessi
                 ui.label(RichText::new(line).size(size::SMALL).color(p.text_muted));
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                session_menu(ui, session, actions);
+                session_menu(ui, view, session, buffers, actions);
                 label_counts(ui, view, session);
             });
         });
@@ -201,52 +264,17 @@ fn label_counts(ui: &mut egui::Ui, view: &View, session: &Session) {
     }
 }
 
-fn session_menu(ui: &mut egui::Ui, session: &Session, actions: &mut Vec<Action>) {
+fn session_menu(ui: &mut egui::Ui, view: &View, session: &Session, buffers: &mut Buffers, actions: &mut Vec<Action>) {
     let p = palette(ui);
     let menu = ui.menu_button(widgets::icon(icons::MORE, size::ICON, p.text_muted), |ui| {
+        super::collections::menu_items(ui, view, session, buffers, actions);
+        ui.separator();
         let text = widgets::icon_text(icons::TRASH, "Move to trash", theme::regular(size::CAPTION), p.danger_text);
         if ui.button(text).on_hover_text(format!("Restorable from Trash for {TRASH_DAYS} days")).clicked() {
             actions.push(Action::TrashSession(session.id));
         }
     });
     widgets::name(&menu.response, Role::Button, &format!("Actions for {}", session.title));
-}
-
-fn collections(ui: &mut egui::Ui, view: &View, buffers: &mut Buffers, actions: &mut Vec<Action>) {
-    let p = palette(ui);
-    let detail = format!("{} course(s)", view.library.courses().len());
-    page_title(ui, "Collections", &detail, |ui| {
-        if widgets::subtle_button(ui, icons::PLUS, "New course", true).clicked() {
-            buffers.adding_course = true;
-        }
-    });
-    if buffers.adding_course {
-        new_course_field(ui, buffers, actions);
-        ui.add_space(space::M);
-    }
-    let live = view.library.live_sessions();
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        for course in view.library.courses() {
-            ui.horizontal(|ui| {
-                ui.label(widgets::icon_text(icons::COLLECTIONS, &course.name, theme::semibold(size::TITLE), p.text));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let label = format!("New session in {}", course.name);
-                    if widgets::subtle_button(ui, icons::PLUS, &label, true).clicked() {
-                        actions.push(Action::AddSession(course.id));
-                    }
-                });
-            });
-            ui.add_space(space::S);
-            let sessions: Vec<_> = live.iter().filter(|(c, _)| c.id == course.id).collect();
-            if sessions.is_empty() {
-                ui.label(RichText::new("No sessions yet.").color(p.text_muted));
-            }
-            for (course, session) in sessions {
-                session_card(ui, view, course, session, actions);
-            }
-            ui.add_space(space::L);
-        }
-    });
 }
 
 fn trash(ui: &mut egui::Ui, view: &View, actions: &mut Vec<Action>) {

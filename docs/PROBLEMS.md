@@ -181,6 +181,9 @@ Every bug, dead end and wrong turn while building Lectio, with the root cause, w
   labels" requirement for the **web** build only; desktop is fine. Options for later: (1) a hidden DOM mirror of the main
   controls (session list, record/stop, notes) kept in sync with the app; (2) an AccessKit web adapter, if egui gains one;
   (3) tell screen-reader users to use the desktop app until then.
+- **Fixed in Phase 4b** (ADR-027): option (1), but driven from egui's whole AccessKit tree rather than a hand-picked list,
+  through egui's plugin hooks. The check that found this problem is back in the browser test (`--flow a11y`,
+  `--expect-ax`) and passes: 448 names in Chrome's accessibility tree on the sample lecture, against none before.
 - **Lesson:** "One codebase" doesn't mean "same behaviour everywhere". A non-functional requirement (accessibility) can hold
   on one platform and fail on another, so it needs a check *per platform*.
 
@@ -497,3 +500,47 @@ Every bug, dead end and wrong turn while building Lectio, with the root cause, w
 - **Fix:** If the window is empty (`lowest > highest`), `best_match` returns `nominal`, and `next_piece` already stops cleanly when a full piece no longer fits. The loop now only runs over valid candidates.
 - **Test:** `every_speed_plays_to_the_end_of_any_length_without_panicking` plays 10 recording lengths (0 to 352,768 samples, including the crashing one) at all 7 speeds to the end. It fails with the same panic on the old code and passes on the new code.
 - **Lesson:** Boundary bugs hide at the end of buffers. A test that sweeps lengths and parameters together catches cases a few hand-picked examples miss.
+
+## P-040: A session listed twice on the Collections page shared its widget ids
+- **Phase:** 4b
+- **Symptom:** on the new Collections page, the session cards of "Graph traversal" were outlined in red with egui's debug
+  warning "First use of widget ID 9194" / "Second use of widget ID 9194". Clicks on the second card could reach the first.
+- **Root cause:** the page lists a session under each collection it is in *and* under its course. Each card's click area
+  has the id `scope_id().with(("open", session.id))`; both cards were in the same scroll area, so the ids were equal.
+- **Fix:** each collection and each course section draws inside `ui.push_id(collection.id / course.id, …)`, so the same
+  session gets a different id in each section. The warning is gone in the screenshot.
+- **Lesson:** an id made from the *data* (a session id) is only unique if each item is shown once; when the same item can
+  appear in several places, the place has to be part of the id.
+
+## P-041: At 200% zoom, "Post next slide" covered the last label chip
+- **Phase:** 4b (accessibility pass)
+- **Symptom:** with `LECTIO_ZOOM=2`, the input bar's "Definition" chip was half hidden under "Post next slide".
+- **Root cause:** the chips and the button shared one wrapping row, with the button laid out right-to-left at the end; when
+  the row was too narrow, the right-aligned layout started on top of chips that were already placed.
+- **Fix:** below 820 points the chips get their own wrapping row and "Post next slide" goes on the next line.
+- **Lesson:** checking 200% zoom with a real screenshot finds layout overlaps that look fine at 100%.
+
+## P-042: Operators inside fractions had no space around them
+- **Phase:** 4b
+- **Symptom:** in the quadratic formula's sample picture, the numerator read "−b±√b²−4ac" with no space around ± and −.
+- **Root cause:** my layout laid out a fraction's numerator and denominator as *scripts*, and scripts skip the spacing
+  around binary operators and relations (as in TeX, where subscripts are tight). Fractions in TeX keep that spacing.
+- **Fix:** a fraction's parts keep the script state of the fraction itself; only superscripts and subscripts are tight.
+- **Lesson:** I found this by looking at rendered samples (`cargo test write_formula_samples -- --ignored`), not from a
+  unit test: for layout code, a picture of a few real formulas is a cheap, effective check.
+
+## P-043: Lints after Phase 4b's new modules (clippy `-D warnings`)
+- **Phase:** 4b
+- **Symptom:** (1) `large size difference between variants` for `SavedData` once `Library` got a collections list;
+  (2) `function ... is never used` in a release build for the screen-reader mapping and the icon's PNG writer; (3) `use of
+  deprecated type alias accesskit::Tree: Use TreeInfo instead`; (4) `field assignment outside of initializer for an
+  instance created with Default::default()` for a tiny-skia `Paint`.
+- **Root cause:** (1) one variant now holds a much bigger value; (2) the mapping is only used by the browser build (and by
+  the desktop's tests), the PNG writer only by a test, so the desktop's non-test build saw dead code; (3) and (4) newer
+  library and lint versions.
+- **Fix:** `Valid(Box<Library>)`; `#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]` on the mapping module and
+  `#[cfg(test)]` on the PNG writer; `TreeInfo`; a struct literal for `Paint`.
+- **Lesson:** code used by only one target, or only by tests, is dead code everywhere else. The packaging script's
+  release build showed it first; every build (each target, with and without tests) is worth running before calling a
+  change done.
+

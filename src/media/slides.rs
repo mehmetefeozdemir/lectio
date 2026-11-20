@@ -46,6 +46,14 @@ fn render_page<'a>(pdf: &'a Pdf, cache: &RenderCache<'a>, page: u32) -> Result<C
     Ok(ColorImage::from_rgba_premultiplied(size, pixmap.data_as_u8_slice()))
 }
 
+/// Renders one page right away, for exports (Phase 4b): the paper view's
+/// export job asks for one page per frame, so the window stays responsive.
+pub fn render_one(bytes: &[u8], page: u32) -> Result<ColorImage, String> {
+    let pdf = open(bytes.to_vec())?;
+    let cache = RenderCache::new();
+    render_page(&pdf, &cache, page)
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::DeckRenderer;
 #[cfg(target_arch = "wasm32")]

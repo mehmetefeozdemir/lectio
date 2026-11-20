@@ -223,6 +223,7 @@ fn slide_item(ui: &mut egui::Ui, view: &View, session: &Session, note: &Note, bu
                 .inner
                 .on_hover_text("Show this slide");
             widgets::name(&response, egui::Role::Image, &format!("Slide {} thumbnail", link.page));
+            super::ink::paint(ui.painter(), response.rect, deck.ink_on(link.page));
             if response.clicked() {
                 actions.push(Action::GoToSlide(link));
             }
@@ -253,6 +254,13 @@ fn slide_title_editor(ui: &mut egui::Ui, note: &Note, buffers: &mut Buffers, act
 
 fn body(ui: &mut egui::Ui, note: &Note, playback: bool, actions: &mut Vec<Action>) {
     let p = palette(ui);
+    if note.kind == NoteKind::Math {
+        let response = super::formula::show(ui, &note.body, size::BODY * 1.3, egui::Sense::click());
+        if response.clicked() && playback {
+            actions.push(Action::PlayFrom(note.offset_ms));
+        }
+        return;
+    }
     let placeholder = match note.attachment.as_ref().map(|a| a.kind) {
         Some(AttachmentKind::Photo) => "Photo",
         Some(AttachmentKind::Sketch) => "Sketch",

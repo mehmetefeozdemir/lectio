@@ -172,7 +172,7 @@ fn pieces(session: &Session) -> Vec<(HitKind, &str, Option<u64>, Option<SlideLin
         let kind = match note.kind {
             NoteKind::Slide => HitKind::SlideTitle,
             NoteKind::Text if note.is_heading() => HitKind::Heading,
-            NoteKind::Text => HitKind::Note,
+            NoteKind::Text | NoteKind::Math => HitKind::Note,
         };
         out.push((kind, note.body.as_str(), Some(note.offset_ms), note.slide));
     }

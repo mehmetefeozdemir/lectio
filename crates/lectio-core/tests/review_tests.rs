@@ -8,7 +8,7 @@ use lectio_core::focus::{FocusEntry, FocusTimer};
 use lectio_core::prefs::AiProvider;
 use lectio_core::sources::Citation;
 use lectio_core::tasks::{TaskFilter, tasks};
-use lectio_core::{LabelKind, Library, ModelError, SessionId};
+use lectio_core::{LabelKind, Library, SCHEMA_VERSION, ModelError, SessionId};
 
 const DAY: u64 = 86_400_000;
 
@@ -212,9 +212,10 @@ fn a_version_4_library_loads_with_no_study_data() {
     assert!(lib.cards().is_empty());
     assert_eq!(lib.preferences().speed_percent, 150);
     assert_eq!(lib.preferences().ai, AiProvider::None);
-    assert!(Library::default().to_json().unwrap().contains("\"schema_version\": 5"));
-    let v6 = r#"{"schema_version": 6, "courses": [], "labels": {"labels": []}}"#;
-    assert!(matches!(Library::from_json(v6), Err(ModelError::UnsupportedSchema { found: 6, supported: 5 })));
+    // Version 6 is written since Phase 4b (organize_tests); a newer file is still refused.
+    let newer = format!(r#"{{"schema_version": {}, "courses": [], "labels": {{"labels": []}}}}"#, SCHEMA_VERSION + 1);
+    let refused = Library::from_json(&newer);
+    assert!(matches!(refused, Err(ModelError::UnsupportedSchema { found, supported }) if found == SCHEMA_VERSION + 1 && supported == SCHEMA_VERSION));
 }
 
 #[test]

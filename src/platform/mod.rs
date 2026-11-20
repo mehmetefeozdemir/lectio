@@ -15,6 +15,9 @@
 //! The rules (model, clock, seek maths, resampling) stay in `lectio-core`,
 //! which has no platform code and compiles for every target.
 
+// Used by the browser's screen-reader layer; tested on every target.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub mod a11y_map;
 pub mod ai;
 pub mod dictionary;
 pub mod speech;
@@ -57,9 +60,18 @@ pub trait Platform {
     fn delete_blob(&self, key: &BlobKey) -> Result<(), String>;
     /// Deletes a session's audio (when its trash period ends).
     fn delete_recording(&self, file_name: &str) -> Result<(), String>;
-    /// Saves text (Markdown export): a save dialog on native, a download in
-    /// the browser. `Ok(false)` = the user cancelled.
-    fn save_text_file(&self, suggested_name: &str, text: &str) -> Result<bool, String>;
+    /// Saves a document: a save dialog on native, a download in the browser.
+    /// `Ok(false)` = the user cancelled.
+    fn save_file(&self, suggested_name: &str, bytes: &[u8], format: DocFormat) -> Result<bool, String>;
+    /// Which document `print` takes here: a PDF (desktop) or a web page (browser).
+    fn print_format(&self) -> DocFormat {
+        DocFormat::Pdf
+    }
+    /// Prints a document of `print_format()`: the desktop opens the PDF in the
+    /// system viewer; the browser opens its print dialog.
+    fn print(&self, _title: &str, _document: Vec<u8>) -> Result<(), String> {
+        Err("Printing isn't available in this window.".into())
+    }
     /// A live camera, where the platform offers one (the browser); `None`
     /// on native, where photos come from the file picker (ADR-013).
     fn open_camera(&self) -> Option<Box<dyn CameraSession>> {
@@ -134,6 +146,48 @@ impl CaptureSource {
             Self::Microphone => "Microphone",
             Self::Computer => "Computer audio",
             Self::Both => "Microphone + computer",
+        }
+    }
+}
+
+/// A document Lectio writes (exports and printing, ADR-025).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocFormat {
+    Markdown,
+    /// Printing in the browser.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    Html,
+    Pdf,
+    Docx,
+}
+
+impl DocFormat {
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Markdown => "md",
+            Self::Html => "html",
+            Self::Pdf => "pdf",
+            Self::Docx => "docx",
+        }
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn mime(self) -> &'static str {
+        match self {
+            Self::Markdown => "text/markdown",
+            Self::Html => "text/html",
+            Self::Pdf => "application/pdf",
+            Self::Docx => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }
+    }
+
+    /// For the save dialog's filter.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Markdown => "Markdown",
+            Self::Html => "Web page",
+            Self::Pdf => "PDF",
+            Self::Docx => "Word document",
         }
     }
 }

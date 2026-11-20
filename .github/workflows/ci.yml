@@ -1,5 +1,6 @@
-# Lectio CI: build, test and lint on Windows, macOS and Linux, and build the web (WebAssembly) version.
-
+# Lectio CI (ADR-010): every push builds and tests on Windows, macOS and
+# Linux, and builds the web (WebAssembly) version.
+#
 
 name: CI
 
@@ -14,7 +15,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
 
-
+defaults:
+  run:
+    working-directory: .
 jobs:
   native:
     name: native (${{ matrix.os }})
@@ -48,7 +51,8 @@ jobs:
             libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             libgl1-mesa-dev \
             libpipewire-0.3-dev libspa-0.2-dev libclang-dev clang libdbus-1-dev \
-            libgbm-dev libegl1-mesa-dev libdrm-dev
+            libgbm-dev libegl1-mesa-dev libdrm-dev \
+            xvfb mesa-vulkan-drivers libgl1-mesa-dri pulseaudio pulseaudio-utils
 
       - name: Build
         run: cargo build --workspace --locked
@@ -58,6 +62,51 @@ jobs:
 
       - name: Lint
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      # Phase 4b (ADR-028): proof on desktops I can't test by hand. The app's
+      # --screenshot mode opens the window on the sample data, draws it and
+      # saves a PNG. Linux draws under a virtual X display (Xvfb) with Mesa's
+      # software renderer; Windows runners have the WARP software adapter.
+      # Advisory until they have been green a few times.
+      - name: Desktop screenshots
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p shots/ci
+          run() {
+            if [ "$RUNNER_OS" = "Linux" ]; then
+              xvfb-run -a -s "-screen 0 1400x900x24" "$@"
+            else
+              "$@"
+            fi
+          }
+          bin=target/debug/lectio
+          os=$(echo "$RUNNER_OS" | tr '[:upper:]' '[:lower:]')
+          run "$bin" --screenshot "shots/ci/$os-workspace.png"
+          LECTIO_START=paper run "$bin" --screenshot "shots/ci/$os-paper.png"
+          LECTIO_START=collections run "$bin" --screenshot "shots/ci/$os-collections.png"
+          LECTIO_ZOOM=2 LECTIO_START=home run "$bin" --screenshot "shots/ci/$os-home-200.png"
+          ls -la shots/ci
+
+      # A headless audio check where the runner allows it: Linux gets a
+      # PulseAudio "null sink", whose monitor is a silent microphone, and the
+      # app records from it for 2 seconds (--self-test-audio checks the WAV).
+      - name: Audio self-test (Linux, PulseAudio null sink)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: |
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=lectio_ci
+          pactl set-default-source lectio_ci.monitor
+          target/debug/lectio --self-test-audio 2
+
+      - name: Upload the desktop screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-screenshots-${{ matrix.os }}
+          path: shots/ci/*.png
+          if-no-files-found: ignore
 
   web:
     name: web (wasm32)
@@ -113,10 +162,23 @@ jobs:
           sleep 1
           CHROME="$(command -v google-chrome)" node tools/web-smoke.mjs "http://127.0.0.1:8765/index.html#test" --flow phase2
 
-      - name: Upload the browser smoke-test screenshots
+      # Phase 4b (ADR-027): screen readers. The names of controls, sessions,
+      # headings and formulas must be in Chrome's accessibility tree, activating
+      # them must drive the app, and Tab must reach the controls in order.
+      - name: Screen-reader and keyboard check (headless Chrome)
+        continue-on-error: true
+        run: |
+          python3 -m http.server 8766 --bind 127.0.0.1 --directory dist &
+          sleep 1
+          CHROME="$(command -v google-chrome)" node tools/web-smoke.mjs "http://127.0.0.1:8766/index.html#sample#test" --flow a11y
+
+      - name: Upload the browser smoke-test screenshots and exports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: web-smoke-screenshots
-          path: shots/web-flow-*.png
+          path: |
+            shots/web-flow-*.png
+            shots/phase4b-web-*.png
+            target/web-downloads/*
           if-no-files-found: ignore

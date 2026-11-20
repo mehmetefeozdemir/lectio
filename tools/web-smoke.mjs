@@ -90,7 +90,14 @@ const FLOWS = {
     // PNG, photo JPEG), read back after the reload.
     "--expect-stored", "notes=6,linked=6,slides=2,attachments=2,decks=1,blobs=3,slide_text=1",
     "--click-name", "Session: Lecture 1", "--wait", "3000", "--shot", "shots/web-flow-after-reload.png",
-    "--click-name", "Reading view", "--wait", "1500", "--shot", "shots/web-flow-reading.png",
+    "--click-name", "Paper view", "--wait", "1500", "--shot", "shots/web-flow-reading.png",
+    // Phase 4b: export the paper view as PDF and Word (the slide, sketch and
+    // photo are drawn into them), saved as downloads.
+    "--downloads", "target/web-downloads",
+    "--click-name", "Export", "--wait", "400", "--click-name", "Export as PDF document",
+    "--expect-file", "target/web-downloads/Lecture 1.pdf,20000,%PDF-",
+    "--click-name", "Export", "--wait", "400", "--click-name", "Export as Word document (.docx)",
+    "--expect-file", "target/web-downloads/Lecture 1.docx,20000,PK",
     "--scroll", "700,500,700", "--scroll", "700,500,700", "--wait", "800", "--shot", "shots/web-flow-reading-photo.png",
     "--click-name", "Back to sessions", "--wait", "800", "--shot", "shots/workflow-web-home.png",
     // Phase 3: search finds the slide's own text (read from the PDF).
@@ -112,6 +119,26 @@ const FLOWS = {
     "--wait-stored", "segments>=3,600", "--wait", "1500", "--shot", "shots/phase3-web-transcript.png",
     "--click-name", "Back to sessions", "--wait", "500", "--click-name", "Search", "--wait", "500",
     "--click-name", "Search everything", "--type", "graph", "--wait", "800", "--shot", "shots/phase3-web-search-transcript.png",
+  ],
+  // Phase 4b, screen readers (ADR-027): on the sample data (`#sample#test`),
+  // the names of controls, sessions, headings and formulas must be in the
+  // browser's accessibility tree, and activating mirrored controls (as a
+  // screen reader does) must drive the app. Runs on CI too.
+  a11y: [
+    "--wait", "1500",
+    // The sample opens on its lecture.
+    "--expect-ax", "Back to sessions|Note text|Formula mode|Draw on this slide|Formula: \\text{BFS time} = O(",
+    "--ax-click", "Back to sessions", "--wait", "800",
+    "--expect-ax", "Session: Graph traversal|Home|Collections|Search|Show sessions|Sort sessions",
+    // Keyboard only: Tab walks the navigation, then the page, and each stop is announced.
+    "--click", "1300,700", "--tab-order", "14|Home|Collections|Tasks|Study|Search|Trash|New session|Show sessions|Sort sessions",
+    "--ax-click", "Collections", "--wait", "800",
+    "--expect-ax", "Collection: Midterm 1|Course: CSCA67",
+    "--ax-click", "Home", "--wait", "800",
+    "--ax-click", "Session: Graph traversal", "--wait", "1500",
+    "--ax-click", "Paper view", "--wait", "1200",
+    "--expect-ax", "Breadth-first search|Export|Print|Show times",
+    "--shot", "shots/phase4b-web-paper.png",
   ],
   // Phase 4a, local only (downloads the 469 MB study model and the 47 MB
   // dictionary): labelled notes, the Tasks page, flashcards from Definition
@@ -336,6 +363,84 @@ async function runSteps(cdp, args) {
         i++;
         break;
       }
+      case "--tab-order": {
+        // "N|A|B|…": press Tab N times; after each press read what the live
+        // region announces (ADR-027). A, B, … must be announced in this order.
+        const [count, ...wanted] = value.split("|");
+        const heard = [];
+        for (let n = 0; n < Number(count); n++) {
+          await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", ...KEYS.Tab });
+          await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...KEYS.Tab, text: undefined });
+          await sleep(250);
+          const res = await cdp.send("Runtime.evaluate", {
+            expression: "document.getElementById('lectio_a11y_live')?.textContent || ''",
+            returnByValue: true,
+          });
+          heard.push(res.result.value);
+        }
+        let at = 0;
+        for (const want of wanted) {
+          const found = heard.findIndex((h, i) => i >= at && h.includes(want));
+          if (found < 0) throw new Error(`Tab never reached "${want}" in order (heard: ${heard.join(" / ")})`);
+          at = found + 1;
+        }
+        console.log(`keyboard: ${heard.length} Tab presses, heard ${wanted.length} expected controls in order`);
+        i++;
+        break;
+      }
+      case "--downloads": {
+        // Saves the page's downloads (exports) into this folder.
+        mkdirSync(resolve(value), { recursive: true });
+        await cdp.send("Page.setDownloadBehavior", { behavior: "allow", downloadPath: resolve(value) });
+        i++;
+        break;
+      }
+      case "--expect-file": {
+        // "path,min bytes,starts with": waits up to 30 s for a finished download.
+        const [path, minBytes, magic] = value.split(",");
+        const deadline = Date.now() + 30_000;
+        let bytes = null;
+        while (Date.now() < deadline) {
+          try {
+            bytes = readFileSync(resolve(path));
+            if (bytes.length >= Number(minBytes)) break;
+          } catch {}
+          await sleep(500);
+        }
+        if (!bytes || bytes.length < Number(minBytes)) throw new Error(`no download at ${path}`);
+        if (magic && !bytes.subarray(0, magic.length).equals(Buffer.from(magic))) throw new Error(`${path} doesn't start with ${magic}`);
+        console.log(`downloaded: ${path} (${bytes.length} bytes)`);
+        i++;
+        break;
+      }
+      case "--expect-ax": {
+        // "A|B|C": each name must be in Chrome's accessibility tree, which is
+        // what screen readers read (ADR-027; P-013 found this tree empty).
+        const names = await accessibleNames(cdp);
+        for (const want of value.split("|")) {
+          if (!names.some((n) => n.includes(want))) {
+            throw new Error(`"${want}" is not in the accessibility tree (found: ${names.slice(0, 40).join(" / ")})`);
+          }
+        }
+        console.log(`accessibility tree: ${names.length} names, all ${value.split("|").length} expected found`);
+        i++;
+        break;
+      }
+      case "--ax-click": {
+        // Activates the mirrored element the way a screen reader does (a DOM click).
+        const expression = `(() => {
+          const el = [...document.querySelectorAll("#lectio_a11y [aria-label], #lectio_a11y [role]")]
+            .find((e) => (e.getAttribute("aria-label") || e.textContent) === ${JSON.stringify(value)});
+          if (!el) return false;
+          el.click();
+          return true;
+        })()`;
+        const res = await cdp.send("Runtime.evaluate", { expression, returnByValue: true });
+        if (!res.result.value) throw new Error(`no mirrored element named "${value}"`);
+        await sleep(400);
+        i++;
+        break;
+      }
       case "--wait-stored": {
         // "segments>=1,300": poll IndexedDB until the count is reached (or the seconds run out).
         const [condition, seconds] = value.split(",");
@@ -418,6 +523,13 @@ async function replaceRecording(cdp, base64) {
 }
 
 /** Counts what Lectio saved in IndexedDB "lectio" (see src/platform/web/idb.rs). */
+/** Every name in Chrome's accessibility tree (what a screen reader can read). */
+async function accessibleNames(cdp) {
+  await cdp.send("Accessibility.enable");
+  const { nodes } = await cdp.send("Accessibility.getFullAXTree");
+  return nodes.map((n) => n.name?.value).filter((v) => typeof v === "string" && v.length > 0);
+}
+
 async function storedCounts(cdp) {
   const expression = `(async () => {
     const db = await new Promise((ok, fail) => {

@@ -48,6 +48,6 @@ impl Library {
             .iter()
             .map(|c| Course { sessions: c.sessions.iter().filter(|s| !expired(s)).cloned().collect(), ..c.clone() })
             .collect();
-        (self.with_courses(courses), removed)
+        (self.with_courses(courses).without_missing_sessions_in_collections(), removed)
     }
 }

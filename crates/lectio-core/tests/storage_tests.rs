@@ -43,7 +43,7 @@ fn deleting_a_blob_removes_the_file_and_tolerates_a_missing_one() {
 fn valid_saved_text_is_read_back_as_a_library() {
     let (lib, _) = Library::default().with_course("CSCA67").unwrap();
     let text = lib.to_json().unwrap();
-    assert_eq!(interpret_saved(&text), SavedData::Valid(lib));
+    assert_eq!(interpret_saved(&text), SavedData::Valid(Box::new(lib)));
 }
 
 #[test]

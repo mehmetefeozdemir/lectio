@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::labels::validated_name;
 use crate::material::{Attachment, SlideDeck, SlideLink};
 use crate::cards::Card;
+use crate::collections::Collection;
 use crate::focus::FocusEntry;
 use crate::outline::Outline;
 use crate::prefs::Preferences;
@@ -22,8 +23,9 @@ use crate::{CourseId, LabelKind, LabelSet, ModelError, NoteId, SessionId};
 /// 3 = session workflow (Heading label, slide items, trash, preferences).
 /// 4 = Phase 3 (transcripts, slide text, cleaned audio copy, audio settings).
 /// 5 = Phase 4a (outline, quiz attempts, task state, flashcards, focus log, AI settings).
+/// 6 = Phase 4b (collections, slide ink, formula notes, Home filter and sort).
 /// Older files still load because every new field has a default.
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 /// What a feed item is. Older files have no `kind`: they are text notes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -33,6 +35,8 @@ pub enum NoteKind {
     Text,
     /// A slide posted to the feed; `slide` says which page, `body` is its title.
     Slide,
+    /// A formula (Phase 4b, ADR-023): `body` is its LaTeX source.
+    Math,
 }
 
 fn is_text(kind: &NoteKind) -> bool {
@@ -83,7 +87,7 @@ pub struct Recording {
     pub cleaned_file: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
     pub id: SessionId,
     pub title: String,
@@ -118,7 +122,7 @@ impl Session {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Course {
     pub id: CourseId,
     pub name: String,
@@ -140,6 +144,9 @@ pub struct Library {
     /// Finished focus-timer sessions (Phase 4a).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) focus_log: Vec<FocusEntry>,
+    /// User-defined groups of sessions across courses (Phase 4b, ADR-026).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) collections: Vec<Collection>,
 }
 
 impl Default for Library {
@@ -151,6 +158,7 @@ impl Default for Library {
             preferences: Preferences::default(),
             cards: Vec::new(),
             focus_log: Vec::new(),
+            collections: Vec::new(),
         }
     }
 }
@@ -194,6 +202,11 @@ impl Library {
     /// A copy with this focus log (see `focus.rs`).
     pub(crate) fn with_focus_log(&self, focus_log: Vec<FocusEntry>) -> Library {
         Library { focus_log, ..self.clone() }
+    }
+
+    /// A copy with these collections (see `collections.rs`).
+    pub(crate) fn with_collection_list(&self, collections: Vec<Collection>) -> Library {
+        Library { collections, ..self.clone() }
     }
 
     pub fn course(&self, id: CourseId) -> Option<&Course> {

@@ -59,6 +59,20 @@ pub const TRANSCRIPT: &str = "\u{E1A8}"; // subtitles
 pub const TO_FEED: &str = "\u{E17A}"; // chat-text
 pub const COMPUTER: &str = "\u{E560}"; // desktop
 pub const STOP_CIRCLE: &str = "\u{E4F8}"; // x-circle
+// Phase 4b: formulas, slide ink, paper view, collections.
+pub const FORMULA: &str = "\u{EAB8}"; // sigma
+pub const PEN: &str = "\u{E3AA}";
+pub const HIGHLIGHTER: &str = "\u{EC76}";
+pub const ERASER: &str = "\u{E21E}";
+pub const UNDO_STROKE: &str = "\u{E08A}"; // arrow-u-up-left
+pub const CLEAR: &str = "\u{EC54}"; // broom
+pub const PRINT: &str = "\u{E3DC}";
+pub const FILE_PDF: &str = "\u{E702}";
+pub const FILE_DOC: &str = "\u{EB1E}";
+pub const FILE_TEXT: &str = "\u{E23A}";
+pub const FILTER: &str = "\u{E268}"; // funnel-simple
+pub const SORT: &str = "\u{E444}"; // sort-ascending
+pub const COLLECTION: &str = "\u{E468}"; // stack-simple
 
 /// Each label has its own icon, so labels differ by shape, not only colour.
 pub fn label(kind: LabelKind) -> &'static str {
@@ -68,5 +82,21 @@ pub fn label(kind: LabelKind) -> &'static str {
         LabelKind::Task => TASK,
         LabelKind::Definition => DEFINITION,
         LabelKind::Heading => HEADING,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ab_glyph::{Font, FontRef};
+
+    use super::*;
+
+    #[test]
+    fn every_icon_is_in_the_bundled_icon_font() {
+        let font = FontRef::try_from_slice(crate::media::fonts::ICONS).unwrap();
+        for icon in [RECORD, PAUSE, STOP, PLAY, BACK, FORWARD, STAR, REVIEW, TASK, DEFINITION, IMAGE, CAMERA, SKETCH, SEND, MORE, TRASH, PLUS, PREVIOUS, NEXT, SIDEBAR, MOON, SUN, SYSTEM, READING, SEARCH, SLIDES, LINK, UNLINK, PDF, TAG, CLOSE, UNDO, SETTINGS, EDIT, MICROPHONE, HEADING, HOME, COLLECTIONS, TASKS, BACK_ARROW, LAYOUT, ZOOM_IN, ZOOM_OUT, FULLSCREEN, COPY, EXPORT, WAVEFORM, CAPTIONS, SPEED, SOUND, SCREENSHOT, DOWNLOAD, TRANSCRIPT, TO_FEED, COMPUTER, STOP_CIRCLE, FORMULA, PEN, HIGHLIGHTER, ERASER, UNDO_STROKE, CLEAR, PRINT, FILE_PDF, FILE_DOC, FILE_TEXT, FILTER, SORT, COLLECTION] {
+            let ch = icon.chars().next().unwrap();
+            assert_ne!(font.glyph_id(ch).0, 0, "U+{:04X} is missing from Phosphor.ttf", ch as u32);
+        }
     }
 }

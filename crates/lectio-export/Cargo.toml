@@ -1,0 +1,20 @@
+[package]
+name = "lectio-export"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Lectio's document writers: a session's paper view as HTML (for printing), DOCX and PDF (ADR-025). Pure Rust, no UI."
+
+[dependencies]
+lectio-core = { path = "../lectio-core" }
+# PDF with embedded, subset fonts and PNG images (pure Rust).
+krilla = "0.8"
+# Glyph widths, to wrap paragraphs for the PDF.
+ttf-parser = "0.25"
+# A .docx is a zip of XML files; deflate through flate2's pure-Rust backend.
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+
+[dev-dependencies]
+# Test pictures, and reading the PDFs back.
+image = { version = "0.25", default-features = false, features = ["png"] }
+hayro = "0.9"

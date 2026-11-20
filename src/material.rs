@@ -194,8 +194,12 @@ impl MaterialState {
         }
         let shown = self.shown_slide(session);
         let posted = session.notes.iter().filter(|n| n.kind == NoteKind::Slide).filter_map(|n| n.slide);
+        // The paper view also shows the slides notes refer to (Phase 4b).
+        let reading = self.reading;
+        let linked = session.notes.iter().filter(|n| reading && n.kind != NoteKind::Slide).filter_map(|n| n.slide);
         self.pages_missing = false;
-        for link in shown.into_iter().chain(posted) {
+        let links: Vec<SlideLink> = shown.into_iter().chain(posted).chain(linked).collect();
+        for link in links {
             self.request_page(session, link, load);
         }
         // Decks without their page text yet (imported before Phase 3, or just now).

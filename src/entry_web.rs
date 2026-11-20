@@ -44,7 +44,15 @@ async fn run() -> Result<(), String> {
     };
 
     eframe::WebRunner::new()
-        .start(canvas, eframe::WebOptions::default(), Box::new(move |cc| Ok(Box::new(LectioApp::new(cc, startup)))))
+        .start(
+            canvas,
+            eframe::WebOptions::default(),
+            Box::new(move |cc| {
+                // Screen readers (ADR-027): mirror egui's accessibility tree into the page.
+                cc.egui_ctx.add_plugin(crate::platform::web::a11y::ScreenReaderMirror);
+                Ok(Box::new(LectioApp::new(cc, startup)))
+            }),
+        )
         .await
         .map_err(|e| format!("{e:?}"))
 }

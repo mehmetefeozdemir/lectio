@@ -87,9 +87,11 @@ fn deck_view(ui: &mut egui::Ui, view: &View, session: &Session, deck: &SlideDeck
     ui.add_space(space::S);
     page_strip(ui, deck, page, actions);
     ui.add_space(space::S);
-    page_image(ui, view, deck, page, view.slide_zoom);
+    page_image(ui, view, deck, page, buffers, actions);
     ui.add_space(space::S);
     controls(ui, view, session, deck, page, actions);
+    let has_ink = !deck.ink_on(page).is_empty();
+    super::ink::toolbar(ui, view.paper.ink, deck.id, page, has_ink, view.can_import, actions);
     ui.add_space(space::S);
     ui.horizontal(|ui| {
         let mut link_new = view.material.viewer.link_new_notes;
@@ -153,7 +155,8 @@ fn page_strip(ui: &mut egui::Ui, deck: &SlideDeck, page: u32, actions: &mut Vec<
     });
 }
 
-fn page_image(ui: &mut egui::Ui, view: &View, deck: &SlideDeck, page: u32, zoom: f32) {
+fn page_image(ui: &mut egui::Ui, view: &View, deck: &SlideDeck, page: u32, buffers: &mut Buffers, actions: &mut Vec<Action>) {
+    let zoom = view.slide_zoom;
     let p = palette(ui);
     egui::Frame::new()
         .fill(p.paper)
@@ -164,7 +167,11 @@ fn page_image(ui: &mut egui::Ui, view: &View, deck: &SlideDeck, page: u32, zoom:
                 let alt = format!("{}, slide {page} of {}", deck.title, deck.page_count);
                 let width = ui.available_width() * zoom;
                 let image = egui::Image::from_texture(texture).fit_to_exact_size(egui::vec2(width, width * texture.aspect_ratio().recip()));
-                ui.add(image.corner_radius(CornerRadius::same(radius::CARD)).alt_text(alt));
+                let rect = ui.add(image.corner_radius(CornerRadius::same(radius::CARD)).alt_text(alt)).rect;
+                super::ink::paint(ui.painter(), rect, deck.ink_on(page));
+                if view.paper.ink.on && view.can_import {
+                    super::ink::input(ui, rect, deck.id, page, view.paper.ink, buffers, actions);
+                }
             }
             PageView::Loading => {
                 ui.set_min_height(160.0);
@@ -233,7 +240,8 @@ pub fn fullscreen(ui: &mut egui::Ui, view: &View, session: &Session, actions: &m
     ui.centered_and_justified(|ui| {
         if let PageView::Ready(texture) = view.material.page(deck.id, page) {
             let alt = format!("{}, slide {page} of {}", deck.title, deck.page_count);
-            ui.add(egui::Image::from_texture(texture).shrink_to_fit().alt_text(alt));
+            let rect = ui.add(egui::Image::from_texture(texture).shrink_to_fit().alt_text(alt)).rect;
+            super::ink::paint(ui.painter(), rect, deck.ink_on(page));
         } else {
             ui.spinner();
         }

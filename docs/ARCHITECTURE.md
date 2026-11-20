@@ -1,7 +1,8 @@
 # Architecture
 
-> Updated after each phase. Current state: **end of Phase 4a (Study)**: outline, quizzes, flashcards, tasks, focus timer
-> and definitions on top of Phases 1–3 (see "Phase 4a: study" at the end).
+> Updated after each phase. Current state: **end of Phase 4b (Polish and ship)**: formulas, slide ink, the paper view
+> with PDF/DOCX export, collections, the browser screen-reader layer, CI proof and releases, on top of Phases 1–4a (see
+> "Phase 4b" at the end).
 
 ## Stack
 Rust 2024 edition, **one codebase for Windows, macOS, Linux and the web** (ADR-010). UI with **eframe/egui 0.37** (ADR-003),
@@ -51,6 +52,8 @@ flowchart TB
 | `StudyModel` (Phase 4a, ADR-021) | one thread: Qwen (candle), Ollama, endpoint (`ureq`) | Qwen in a second Web Worker; Ollama / endpoint with `fetch` |
 | `DictionaryService` (Phase 4a, ADR-022) | thread; index file in `dictionary/` | index built in a short-lived worker, kept in IndexedDB |
 | `load_secret` / `save_secret` (the endpoint key) | `secrets.json`, permissions 0600 | `localStorage`, this page's address only |
+| `save_file` / `print` (Phase 4b, ADR-025) | save dialog (`rfd`); PDF opened in the system viewer | download (`<a download>`); HTML printed from a hidden frame |
+| screen readers (Phase 4b, ADR-027) | AccessKit → the OS (eframe) | `web::a11y` plugin: AccessKit tree → hidden DOM overlay |
 
 Browser APIs are asynchronous; the traits are synchronous because egui redraws every frame. So the web side starts work with
 `wasm_bindgen_futures::spawn_local` and the app checks results each frame: `is_ready()`, `take_error()`,
@@ -62,10 +65,17 @@ lectio/
 ├── Cargo.toml                 # workspace root + the `lectio` app; dependencies split by target
 ├── index.html, Trunk.toml     # web build (trunk build --release → dist/)
 ├── web/lectio-capture-worklet.js  # browser audio-thread code for recording
-├── .github/workflows/ci.yml   # CI: ubuntu/windows/macos + web (+ advisory browser flow)
-├── tools/web-smoke.mjs        # headless-Chrome test driver; `--flow phase2` (CI) and `--flow phase3` (local, downloads a model)
+├── .github/workflows/ci.yml   # CI: ubuntu/windows/macos + web; Phase 4b: desktop screenshots (xvfb, WARP), audio
+│                              #   self-test, browser screen-reader flow (advisory)
+├── .github/workflows/release.yml  # Phase 4b: on v* tags, .dmg / .msi + .zip / AppImage / web zip → GitHub release
+├── .cargo/config.toml         # WebAssembly SIMD for browser builds (P-035)
+├── tools/web-smoke.mjs        # headless-Chrome test driver; flows phase2 (CI, incl. PDF/DOCX export), a11y (CI:
+│                              #   accessibility tree, screen-reader clicks, Tab order), phase3 / phase4a (local)
+├── tools/package/             # Phase 4b: macos.sh (.app + .dmg), windows.ps1 + lectio.wxs (.zip + .msi),
+│                              #   linux-appimage.sh, web.sh; used by release.yml and runnable locally
 ├── assets/sample-slides.pdf   # 2-page deck for sample data, tests and the browser flow
-├── assets/fonts/              # Inter, JetBrains Mono (OFL), Phosphor icons (MIT); sources in README.md
+├── assets/fonts/              # Inter, JetBrains Mono, Noto Sans Math (OFL), Phosphor icons (MIT); sources in README.md
+├── assets/icon/               # Phase 4b: lectio-icon.png (drawn by src/media/icon.rs) for the installers
 ├── crates/lectio-core/        # pure domain logic: no UI, no audio I/O, no platform code
 │   ├── src/
 │   │   ├── lib.rs             # public API, MAX_NAME_CHARS
@@ -96,10 +106,15 @@ lectio/
 │   │   ├── tasks.rs           # Phase 4a: Task notes across courses, done / due date, filters
 │   │   ├── focus.rs           # Phase 4a: FocusTimer (pause/resume), focus log per course
 │   │   ├── dictionary.rs      # Phase 4a: WordNet line parsing, compact index, base forms, online provider trait
+│   │   ├── collections.rs     # Phase 4b: Collection, add/remove sessions, HomeFilter + SessionSort, home_sessions
+│   │   ├── ink.rs             # Phase 4b: InkStroke / PageInk on a deck, checks + rounding, eraser hit test, undo
+│   │   ├── math.rs, math/     # Phase 4b: LaTeX subset parser (parse.rs, symbols.rs) + box layout (typeset)
+│   │   ├── paper.rs           # Phase 4b: the paper view's blocks, pictures needed, Markdown writer
 │   │   └── storage.rs         # LibraryStore, interpret_saved, JsonFileStore, FileBlobStore (atomic writes)
 │   └── tests/                 # model, material, workflow, transcript, search, audio DSP, seek, clock, storage,
 │                              #   resample, capture pipeline, study (chunking, citations, quiz), review (SM-2,
-│                              #   tasks, focus, dictionary, v4 → v5)
+│                              #   tasks, focus, dictionary, v4 → v5), organize (collections, Home filter, v5 → v6),
+│                              #   polish (ink, formulas, paper blocks, Markdown)
 ├── crates/lectio-speech/      # Phase 3 (ADR-016): Whisper on candle, no platform code
 │   └── src/                   # mel.rs (spectrogram), tokenizer.rs (tokens → text, languages), models.rs (files,
 │                              #   pinned revisions, SHA-256), engine.rs (one 30 s window), job.rs (window stepper,
@@ -107,6 +122,8 @@ lectio/
 ├── crates/lectio-llm/         # Phase 4a (ADR-021): Qwen2.5-Instruct (GGUF) on candle, no platform code
 │   └── src/                   # models.rs (files, pinned revisions, SHA-256), engine.rs (chat template, greedy
 │                              #   decoding with a repeat penalty), protocol.rs (page ↔ study worker messages)
+├── crates/lectio-export/      # Phase 4b (ADR-025): paper blocks → HTML (print), DOCX (hand-written OOXML), PDF
+│                              #   (krilla); tests read the files back (zip, hayro)
 ├── crates/lectio-worker/      # the browser's Web Worker (wasm only; empty on desktop): Whisper (Phase 3), and in a
 │                              #   second copy the study model and the dictionary index (Phase 4a, study.rs)
 ├── src/
@@ -121,16 +138,21 @@ lectio/
 │   ├── app/audio_actions.rs   # Phase 3: speed, filters, cleaned copy, recording source, screenshots
 │   ├── app/study_actions.rs   # Phase 4a: AI provider, jobs (outline/quiz/cards over chunks), quiz and review runs
 │   ├── app/organize_actions.rs # Phase 4a: tasks, focus timer, word look-up
+│   ├── app/paper_actions.rs   # Phase 4b: formula mode, paper options, export/print job (one picture per frame)
+│   ├── app/ink_actions.rs     # Phase 4b: drawing tools, add/erase/undo/clear strokes
+│   ├── app/collection_actions.rs # Phase 4b: collections, Home filter and sort
 │   ├── action.rs              # Action enum: everything the UI can ask for
 │   ├── material.rs            # Phase 2 runtime state: pending imports, Viewer, image/slide texture caches, camera
 │   ├── media/                 # slides.rs (hayro, DeckRenderer: pages + text), slide_text.rs (text device),
-│   │                          #   images.rs (EXIF-upright decode, JPEG), sketch.rs (PNG)
+│   │                          #   images.rs (EXIF-upright decode, JPEG), sketch.rs (PNG); Phase 4b: math.rs (formula →
+│   │                          #   image with ab_glyph + tiny-skia), ink.rs (strokes over a page → PNG), icon.rs, fonts.rs
 │   ├── platform/
 │   │   ├── mod.rs             # traits Platform / AudioCapture / AudioPlayback / CameraSession, Pending, FileKind,
 │   │   │                      #   CaptureSource
 │   │   ├── speech.rs          # SpeechService trait, SpeechRequest / SpeechEvent
 │   │   ├── ai.rs              # Phase 4a: StudyModel trait, AiRequest (key hidden in Debug), Ollama / OpenAI bodies
 │   │   ├── dictionary.rs      # Phase 4a: DictionaryService trait, the pinned WordNet download
+│   │   ├── a11y_map.rs        # Phase 4b: AccessKit node → HTML role, name and state (tested on desktop)
 │   │   ├── wav.rs             # WAV bytes ↔ samples (shared; 2 unit tests)
 │   │   ├── native/            # mod.rs (NativePlatform: data folder, rfd, FileBlobStore, xcap), recorder.rs (mic +
 │   │   │                      #   loopback, mixing), player.rs (stretcher + filters), speech.rs (thread, CLI),
@@ -139,14 +161,16 @@ lectio/
 │   │   └── web/               # mod.rs (WebPlatform, localStorage key), idb.rs, store.rs, recorder.rs, player.rs,
 │   │                          #   files.rs, camera.rs, display.rs (getDisplayMedia), fetch.rs (checked downloads into
 │   │                          #   a JS buffer, JSON POST), speech.rs (speech worker), ai.rs (study worker, Ollama,
-│   │                          #   endpoint), dictionary.rs (index built in a short-lived worker)
+│   │                          #   endpoint), dictionary.rs (index built in a short-lived worker); Phase 4b: a11y.rs
+│   │                          #   (screen-reader DOM overlay plugin), print from a hidden frame
 │   ├── ui/                    # views (see "Screens and workspace"): theme (tokens), widgets, icons, format,
 │   │                          #   nav (left column), home (Home/Collections/Trash), search (Search page),
 │   │                          #   workspace (panels, Layout menu, tabs, caption strip), slides, notes (feed),
 │   │                          #   stream (Audio | Transcript | Outline tabs), transcript, capture + playback + composer
 │   │                          #   (input bar), timeline, reading, sketch, camera, screen_crop, labels (rename window);
 │   │                          #   Phase 4a: outline, study (cards, quiz, focus), tasks, define (look-up window),
-│   │                          #   ai_settings
+│   │                          #   ai_settings; Phase 4b: formula (preview + textures), ink (paint, tools, input), collections,
+│   │                          #   reading = the paper view
 │   ├── demo.rs                # sample data with slides + a sketch (--screenshot, web #sample)
 │   ├── self_test.rs           # native only: headless mic test
 │   └── screenshot.rs          # native only: draws 120 frames, saves a PNG, exits
@@ -154,7 +178,7 @@ lectio/
 └── shots/                     # screenshots
 ```
 
-## Data model (implemented; schema version 5)
+## Data model (implemented; schema version 6)
 The diagram shows versions 1–4; the Phase 4a (v5) additions are drawn separately below it.
 ```mermaid
 erDiagram
@@ -302,6 +326,35 @@ erDiagram
 numbers are ignored, and an item left with no citation is dropped); a card's front and back can't be blank; only
 Task-labelled notes take a done state or a due date; a focus entry needs an existing course and at least one minute (the
 timer offers 1–180); due flashcards only count for sessions that aren't in the trash.
+
+Schema version 6 (Phase 4b): collections, slide ink and formula notes. A v5 file loads unchanged
+(`a_version_5_library_loads_with_no_collections_ink_or_formulas`).
+```mermaid
+erDiagram
+  LIBRARY ||--o{ COLLECTION : "collections (v6)"
+  COLLECTION }o--o{ SESSION : "sessions, in order (a session can be in many)"
+  SLIDE_DECK ||--o{ PAGE_INK : "ink (v6, only pages with strokes)"
+  PAGE_INK ||--|{ INK_STROKE : strokes
+  NOTE ||--o| FORMULA : "kind = math (v6): body is LaTeX"
+  COLLECTION {
+    uuid id
+    string name "1-80 chars"
+  }
+  PAGE_INK {
+    u32 page "1..=page_count"
+  }
+  INK_STROKE {
+    enum tool "pen | highlighter"
+    enum color "black | red | blue | green | yellow"
+    f32 width "fraction of the page width"
+    f32_pairs points "0..1 across and down the page, to 1/10 000; at most 2 000"
+  }
+```
+`Preferences` gains `home_filter` (`all | course | collection | label`) and `home_sort` (`newest | oldest | title |
+longest`). Rules (tested in `tests/organize_tests.rs` and `tests/polish_tests.rs`): a collection lists each session once;
+adding a session that doesn't exist fails; trashed sessions stay in a collection but are hidden, and leave it when they
+are removed for good; a stroke needs 1–2 000 points inside the page and a page at most 500 strokes; the eraser removes
+whole strokes within its reach; a formula note must parse (the same check applies when it is edited).
 
 Rules enforced by `Library` (tested in `tests/model_tests.rs` and `tests/material_tests.rs`): names can't be blank or longer
 than 80 characters; a note needs text, a label or an image; notes of every kind stay sorted by `offset_ms` (linking a slide
@@ -758,3 +811,93 @@ so the app never waits forever, and the next request starts a fresh worker.
   no third-party scripts.
 - The dictionary is English only. Look-ups don't handle irregular forms ("went" → "go").
 - A running job (outline, AI quiz, AI cards) can't be cancelled; it runs to the end or stops at the first error.
+
+## Phase 4b: polish and ship
+
+### A formula note: LaTeX → preview → feed, paper view and exports (ADR-023)
+```mermaid
+flowchart LR
+  T["input bar in Formula mode (Σ)"] -->|"each keystroke"| P["lectio_core::math::parse + typeset<br/>(glyph sizes from media::math)"]
+  P -->|ok| R["media::math::render: glyphs (Noto Sans Math, Inter) + bars and strokes (tiny-skia)"]
+  P -->|error| E["the parser's message under the field"]
+  R --> X["egui texture, cached per formula, size, colour and screen scale"]
+  T -->|Enter| N["Library::with_math_note (parse checked again) → Note { kind: Math, body: LaTeX }"]
+  N --> F["feed and paper view: the same texture, alt text = the LaTeX"]
+  N --> M["Markdown: $$ LaTeX $$"]
+  N --> D["PDF / DOCX / HTML: PNG drawn at 2× size"]
+```
+Layout is TeX's idea in small: every piece is a box with a width, an ascent and a descent; rows add widths with spacing by
+class (operators and relations get medium and thick spaces); scripts are smaller and shifted; fractions stack around the
+math axis with a bar; roots, accents and `\left…\right` brackets are drawn or scaled to the contents.
+
+### Drawing on a slide (ADR-024)
+The slide panel's pen button turns drawing on and shows pen, highlighter, eraser, five colours, undo and clear. A drag
+over the page collects points as page fractions in `Buffers::ink_stroke` and draws them live; pen-up sends
+`Action::AddInkStroke`, and `Library::with_ink_stroke` checks and rounds them into the deck's `PageInk`. The eraser sends a
+point; every stroke within its reach is removed. The same strokes are painted by egui over the page in the slides panel,
+full screen, the feed's slide thumbnails and the paper view, and by tiny-skia onto the rendered page for exports
+(highlighters first, at 38% opacity, so pen strokes stay on top).
+
+### Paper view → Copy, Print, Export (ADR-025)
+```mermaid
+sequenceDiagram
+  participant V as ui/reading.rs (paper view)
+  participant A as app/paper_actions.rs
+  participant C as lectio_core::paper
+  participant P as Platform
+  participant W as lectio_export
+  V->>C: document(session, options) → blocks (drawn every frame)
+  V->>A: Action::Export(Pdf | Docx | Markdown) or Action::Print
+  A->>C: document + assets(blocks) → pictures to make
+  loop one picture per frame
+    A->>P: get_blob(PDF / photo) when not loaded yet
+    A->>A: slide page (hayro) + ink (tiny-skia) / photo / formula → PNG
+  end
+  A->>W: pdf / docx / html (blocks, pictures, Inter)
+  A->>P: save_file (dialog or download) / print (system PDF viewer or browser print dialog)
+```
+Copy puts the Markdown of the same blocks on the clipboard. The browser test exports a recorded lecture as PDF (140 KB)
+and DOCX (100 KB) and checks the files.
+
+### Collections and the Home list (ADR-026)
+Home shows `Library::home_sessions(filter, sort)`; the filter and sort menus change the saved preferences. Each session's
+"⋯" menu has a tick per collection and "New collection with this session…". The Collections page lists each collection
+(rename, delete) and then each course; sections are separate id scopes, because one session can appear in several
+(P-040). "Quiz me" accepts a collection.
+
+### Screen readers in the browser (ADR-027)
+```mermaid
+flowchart LR
+  E["egui frame"] -->|"output_hook: AccessKit TreeUpdate"| M["a11y_map::mirror → Spec per readable node"]
+  M --> D["#lectio_a11y overlay: button / input / role=… elements with aria-* state, positioned like the widgets, invisible, pointer-events: none"]
+  D -->|"screen reader activates (click) / types (input)"| Q["queued AccessKit Click / SetValue"]
+  Q -->|"input_hook, next frame"| E
+  E -->|"keyboard focus moved"| L["#lectio_a11y_live (aria-live=polite): 'Start recording, button'"]
+```
+Only elements whose spec changed are touched, and the order is rebuilt only when egui's tree order changes, so a still
+screen costs a comparison per node per frame.
+
+### Proof and releases (ADR-028)
+CI builds and tests on Windows, macOS and Linux and builds the web app, as before. New and advisory: each desktop job
+opens the app on the sample data and saves screenshots (Linux under Xvfb with Mesa's software renderer; Windows with the
+WARP software adapter) as artifacts; Linux records 2 s from a PulseAudio null sink with `--self-test-audio`; the web job
+runs the screen-reader and keyboard flow. `release.yml` runs the scripts in `tools/package/` on a `v*` tag and attaches
+the files and their SHA-256 sums to a GitHub release. Install steps are in `docs/README.md`.
+
+### Phase 4b accessibility
+- Browser: every named control, heading, session card, formula (as its LaTeX) and slide is in the accessibility tree;
+  screen-reader activation and typing reach egui; Tab moves through controls and each is announced.
+- Keyboard: Tab / Shift-Tab reach every control on every screen (the browser test checks the order on Home); the drawing
+  tools are buttons, but drawing itself needs a pointer.
+- 200% zoom: checked with `LECTIO_ZOOM=2` screenshots of Home, the workspace and the paper view; the input bar overlap it
+  found is fixed (P-041).
+- Contrast: tests check WCAG AA for text and graphics in both themes, label chips and markers, and pen ink on slides.
+
+### Phase 4b known limitations
+- Formulas: no matrices, `\begin{…}` environments or macros; formulas in a PDF or DOCX are pictures (alt text = LaTeX).
+- PDF text uses Inter, so characters Inter lacks (e.g. Chinese) show as empty boxes in the PDF (they show in the app).
+- Ink is stroke-level: the eraser removes a whole stroke. Drawing needs a mouse, pen or touch.
+- The browser mirror follows egui's frames: content that changes without a repaint is read only after the next frame.
+- Exports run on the main thread one picture per frame: a deck with many slides takes a few seconds to prepare.
+- The CI screenshot, audio and release jobs were written and checked locally (YAML, the macOS and web packaging scripts),
+  but can only run on GitHub.

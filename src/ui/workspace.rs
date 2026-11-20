@@ -16,7 +16,7 @@ const SIDE_PANEL_MAX_SHARE: f32 = 0.3;
 const PANELS: [(Panel, &str, &str); 3] =
     [(Panel::Slides, icons::SLIDES, "Slides"), (Panel::Feed, icons::EDIT, "Feed"), (Panel::Audio, icons::WAVEFORM, "Audio")];
 
-/// Back arrow, the session title, and Layout / Reading view / theme / settings.
+/// Back arrow, the session title, and Layout / Paper view / theme / settings.
 pub fn toolbar(ui: &mut egui::Ui, view: &View, session: &Session, buffers: &mut Buffers, actions: &mut Vec<Action>) {
     let p = palette(ui);
     ui.horizontal(|ui| {
@@ -31,9 +31,9 @@ pub fn toolbar(ui: &mut egui::Ui, view: &View, session: &Session, buffers: &mut 
             settings_and_theme(ui, view, actions);
             layout_menu(ui, view, actions);
             let reading = view.material.reading;
-            let text = widgets::icon_text(icons::READING, "Reading view", theme::regular(size::CAPTION), p.text);
+            let text = widgets::icon_text(icons::READING, "Paper view", theme::regular(size::CAPTION), p.text);
             let button = ui.add(egui::Button::selectable(reading, text));
-            widgets::name(&button, Role::Button, "Reading view");
+            widgets::name(&button, Role::Button, "Paper view");
             if button.on_hover_text("Notes and slides as a document, without the audio").clicked() {
                 actions.push(Action::SetReading(!reading));
             }

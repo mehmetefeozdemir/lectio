@@ -16,6 +16,7 @@ use crate::self_test;
 const WINDOW_TITLE: &str = "Lectio";
 const DEFAULT_WINDOW_SIZE: [f32; 2] = [1120.0, 740.0];
 const MIN_WINDOW_SIZE: [f32; 2] = [640.0, 420.0];
+const ICON_SIZE: u32 = 256;
 const USAGE: &str = "Usage: lectio [--screenshot <file.png> | --self-test-audio <seconds> | \
                      --transcribe <file.wav> [--model tiny|base|small] [--language <code>] | \
                      --ai-benchmark [small|large] [--saved]]";
@@ -55,13 +56,15 @@ pub fn run() -> ExitCode {
                 Some(path) => LectioApp::new(cc, Startup::Sample).with_screenshot(path),
                 None => LectioApp::new(cc, Startup::Saved(Ok(Box::new(NativePlatform::open())))),
             };
-            // Test aid: LECTIO_START=home|trash|collections|tasks|study opens on that screen (screenshots).
+            // Test aid: LECTIO_START=home|trash|collections|tasks|study|paper|ink opens on that screen (ink = drawing tools on) (screenshots).
             let app = match std::env::var("LECTIO_START").as_deref() {
                 Ok("home") => app.with_screen(Screen::Home),
                 Ok("trash") => app.with_screen(Screen::Trash),
                 Ok("collections") => app.with_screen(Screen::Collections),
                 Ok("tasks") => app.with_screen(Screen::Tasks),
                 Ok("study") => app.with_screen(Screen::Study),
+                Ok("paper") => app.with_paper(),
+                Ok("ink") => app.with_ink_tools(),
                 Ok("search") => app.with_search(&std::env::var("LECTIO_SEARCH").unwrap_or_default()),
                 _ => app,
             };
@@ -75,6 +78,10 @@ pub fn run() -> ExitCode {
                 Ok("dark") => cc.egui_ctx.set_theme(egui::ThemePreference::Dark),
                 Ok("light") => cc.egui_ctx.set_theme(egui::ThemePreference::Light),
                 _ => {}
+            }
+            // Test aid: LECTIO_ZOOM=2 shows the app at 200% (the accessibility check in ADR-027).
+            if let Some(zoom) = std::env::var("LECTIO_ZOOM").ok().and_then(|z| z.parse::<f32>().ok()).filter(|z| (0.5..=4.0).contains(z)) {
+                cc.egui_ctx.set_zoom_factor(zoom);
             }
             Ok(Box::new(app))
         }),
@@ -204,6 +211,10 @@ fn native_options(for_screenshot: bool) -> eframe::NativeOptions {
         .with_title(WINDOW_TITLE)
         .with_inner_size(window_size())
         .with_min_inner_size(MIN_WINDOW_SIZE);
+    // The app icon in the title bar, task bar and Dock (Phase 4b).
+    if let Some(rgba) = crate::media::icon::rgba(ICON_SIZE) {
+        viewport = viewport.with_icon(egui::IconData { rgba, width: ICON_SIZE, height: ICON_SIZE });
+    }
     if for_screenshot {
         // Never take focus away from whatever the user is doing.
         viewport = viewport.with_active(false);

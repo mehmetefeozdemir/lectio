@@ -13,15 +13,24 @@ use super::{LABEL_KEYS, POST_SLIDE, View, icons, shortcut_hint, widgets};
 use crate::action::Action;
 
 /// Room right of the text field for the attach icons and the send button.
-const ATTACH_WIDTH: f32 = 5.0 * 36.0 + 40.0;
+const ATTACH_WIDTH: f32 = 6.0 * 36.0 + 40.0;
+/// Below this width the label chips and "Post next slide" take two rows.
+const NARROW_BAR: f32 = 820.0;
 
 pub fn show(ui: &mut egui::Ui, view: &View, actions: &mut Vec<Action>) {
     let enabled = view.can_take_notes;
     input_row(ui, view, enabled, actions);
-    ui.horizontal_wrapped(|ui| {
-        label_chips(ui, view, enabled, actions);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| post_slide_button(ui, view, actions));
-    });
+    // A right-aligned button can't share a row that wraps: at 200% zoom it
+    // covered the last label chip. Narrow windows get it on its own row.
+    if ui.available_width() < NARROW_BAR {
+        ui.horizontal_wrapped(|ui| label_chips(ui, view, enabled, actions));
+        ui.horizontal(|ui| post_slide_button(ui, view, actions));
+    } else {
+        ui.horizontal(|ui| {
+            label_chips(ui, view, enabled, actions);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| post_slide_button(ui, view, actions));
+        });
+    }
 }
 
 /// Adds the next slide to the feed at the current time.
@@ -41,12 +50,22 @@ fn post_slide_button(ui: &mut egui::Ui, view: &View, actions: &mut Vec<Action>) 
 fn input_row(ui: &mut egui::Ui, view: &View, enabled: bool, actions: &mut Vec<Action>) {
     let mut text = view.draft.text().to_owned();
     let anchor = format_offset(view.draft.anchor_ms(view.offset_ms));
-    let hint = if enabled { "Write a note…  (Enter to save)" } else { "Start recording to take notes" };
+    let formula = view.paper.formula_mode;
+    if formula && enabled {
+        super::formula::preview(ui, &text);
+    }
+    let hint = match (enabled, formula) {
+        (false, _) => "Start recording to take notes",
+        (true, true) => r"LaTeX formula, e.g. \frac{a}{b}  (Enter to save)",
+        (true, false) => "Write a note…  (Enter to save)",
+    };
     ui.horizontal(|ui| {
         widgets::time_pill(ui, &anchor, false, "Time the note will be saved at").on_hover_text("The time this note will be saved at");
         let width = ui.available_width() - ATTACH_WIDTH;
-        let field = ui.add_enabled(enabled, egui::TextEdit::singleline(&mut text).hint_text(hint).desired_width(width));
-        widgets::name(&field, Role::TextInput, "Note text");
+        let edit = egui::TextEdit::singleline(&mut text).hint_text(hint).desired_width(width);
+        let edit = if formula { edit.font(egui::TextStyle::Monospace) } else { edit };
+        let field = ui.add_enabled(enabled, edit);
+        widgets::name(&field, Role::TextInput, if formula { "Formula (LaTeX)" } else { "Note text" });
         if field.changed() {
             actions.push(Action::DraftChanged(text.clone()));
         }
@@ -90,6 +109,11 @@ fn label_chips(ui: &mut egui::Ui, view: &View, enabled: bool, actions: &mut Vec<
 
 fn attach_icons(ui: &mut egui::Ui, view: &View, actions: &mut Vec<Action>) {
     let enabled = view.can_take_notes && view.can_import;
+    let formula = view.paper.formula_mode;
+    let tip = if formula { "Back to text notes" } else { "Write a formula (LaTeX), with a live preview" };
+    if widgets::toggle_icon(ui, icons::FORMULA, "Formula mode", tip, formula, view.can_take_notes).clicked() {
+        actions.push(Action::SetFormulaMode(!formula));
+    }
     if widgets::icon_button(ui, icons::IMAGE, "Add a photo from a file", enabled).clicked() {
         actions.push(Action::AddPhotoFromFile);
     }

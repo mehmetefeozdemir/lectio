@@ -68,6 +68,21 @@ pub fn icon_button_sized(ui: &mut egui::Ui, icon: &str, label: &str, enabled: bo
     response
 }
 
+/// An icon button that is on or off (formula mode, drawing tools): accent
+/// colour and a soft fill when on. `name` stays the same in both states
+/// (screen readers also hear "selected"); `tip` says what a click does.
+pub fn toggle_icon(ui: &mut egui::Ui, icon: &str, name: &str, tip: &str, on: bool, enabled: bool) -> Response {
+    let p = palette(ui);
+    let text = self::icon(icon, size::ICON, if on { p.accent } else { p.text_muted });
+    let button = egui::Button::new(text).selected(on).frame_when_inactive(on).min_size(egui::vec2(28.0, 28.0));
+    let response = ui.add_enabled(enabled, button).on_hover_text(tip);
+    let label = name.to_owned();
+    response.widget_info(move || WidgetInfo::selected(Role::Button, enabled, on, &label));
+    let entry = (name.to_owned(), response.rect);
+    response.ctx.data_mut(|d| d.get_temp_mut_or_default::<Vec<(String, Rect)>>(Id::unique(NAMED_WIDGETS)).push(entry));
+    response
+}
+
 /// An icon + text button with the subtle (grey) frame.
 pub fn subtle_button(ui: &mut egui::Ui, icon: &str, label: &str, enabled: bool) -> Response {
     let job = icon_text(icon, label, theme::regular(size::CAPTION), palette(ui).text);

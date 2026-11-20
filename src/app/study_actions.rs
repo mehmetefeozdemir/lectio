@@ -208,6 +208,7 @@ impl LectioApp {
             QuizScope::Course(c) => {
                 self.library.live_sessions().iter().filter(|(course, _)| course.id == c).map(|(_, s)| s.id).collect()
             }
+            QuizScope::Collection(id) => self.library.collection_sessions(id),
         }
     }
 

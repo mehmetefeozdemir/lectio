@@ -3,6 +3,7 @@
 //! library or needing a microphone.
 
 use lectio_core::material::{Attachment, AttachmentKind, BlobKey, MediaKind, SlideLink};
+use lectio_core::ink::{InkColor, InkStroke, InkTool};
 use lectio_core::transcript::{Segment, Transcript};
 use lectio_core::{LabelKind, Library, ModelError, Recording, SessionId};
 
@@ -83,6 +84,18 @@ fn try_sample_library() -> Result<Sample, ModelError> {
     let lib = lib.with_slide_link(session, sketch_note, Some(SlideLink { deck, page: 2 }))?;
     let lib = lib.with_transcript(session, sample_transcript())?;
 
+    // Phase 4b: a formula, a drawing on slide 2, and a collection across courses.
+    let (lib, _) = lib.with_math_note(session, 20 * MINUTE_MS, r"\text{BFS time} = O(|V| + |E|)", &[LabelKind::Important])?;
+    let (lib, _) = lib.with_math_note(session, 36 * MINUTE_MS, r"\sum_{v \in V} \deg(v) = 2|E|", &[])?;
+    let lib = sample_ink().into_iter().try_fold(lib, |lib, stroke| lib.with_ink_stroke(session, deck, 2, stroke))?;
+    let limits = lib.courses().iter().flat_map(|c| &c.sessions).find(|s| s.title == "Limits").map(|s| s.id);
+    let (lib, midterm) = lib.with_collection("Midterm 1")?;
+    let lib = lib.with_session_in_collection(midterm, session)?;
+    let lib = match limits {
+        Some(limits) => lib.with_session_in_collection(midterm, limits)?,
+        None => lib,
+    };
+
     let blobs = vec![(slides_key, SAMPLE_SLIDES.to_vec()), (sketch_key, sketch_png)];
     Ok(Sample { library: lib, session, blobs })
 }
@@ -103,6 +116,20 @@ fn sample_transcript() -> Transcript {
     let segments =
         lines.iter().map(|&(start_ms, end_ms, text)| Segment { start_ms, end_ms, text: text.to_owned() }).collect();
     Transcript { language: "en".into(), model: "base".into(), segments, complete: true }
+}
+
+/// A highlight across slide 2's title and a red circle around its middle.
+fn sample_ink() -> Vec<InkStroke> {
+    let circle: Vec<[f32; 2]> = (0..=32)
+        .map(|i| {
+            let a = i as f32 / 32.0 * std::f32::consts::TAU;
+            [0.5 + 0.16 * a.cos(), 0.55 + 0.12 * a.sin()]
+        })
+        .collect();
+    vec![
+        InkStroke { tool: InkTool::Highlighter, color: InkColor::Yellow, width: 0.004, points: vec![[0.12, 0.33], [0.62, 0.33]] },
+        InkStroke { tool: InkTool::Pen, color: InkColor::Red, width: 0.003, points: circle },
+    ]
 }
 
 /// A small tree (root with two children), like a BFS diagram on a board.

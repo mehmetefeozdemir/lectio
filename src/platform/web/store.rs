@@ -38,7 +38,7 @@ async fn read_saved(db: &IdbDatabase) -> Result<Result<LoadOutcome, StoreError>,
     };
     let text = value.as_string().unwrap_or_default();
     Ok(match interpret_saved(&text) {
-        SavedData::Valid(library) => Ok(LoadOutcome { library, recovered_from: None }),
+        SavedData::Valid(library) => Ok(LoadOutcome { library: *library, recovered_from: None }),
         SavedData::Newer(e) => Err(StoreError::Model(e)),
         SavedData::Unreadable => {
             let backup_key = format!("{LIBRARY_KEY}.broken-{}", now_unix_ms());

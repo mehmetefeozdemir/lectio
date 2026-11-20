@@ -1,0 +1,192 @@
+# Lectio releases (ADR-028): pushing a tag like v0.4.0 builds the installers
+# for every platform and attaches them to a GitHub release:
+#   macOS: Lectio-<v>-macos-universal.dmg   (Apple Silicon + Intel)
+#   Windows: Lectio-<v>-windows-x64.zip and .msi
+#   Linux: Lectio-<v>-linux-x86_64.AppImage
+#   Web: Lectio-<v>-web.zip                 (files for any static host)
+# The packaging steps are scripts in tools/package/, so they can be run
+# and checked locally too. Signing happens only when the secrets exist:
+#   macOS: MACOS_CERT_P12, MACOS_CERT_PASSWORD, MACOS_SIGNING_IDENTITY,
+#          and for notarisation APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD
+#   Windows: WINDOWS_CERT_PFX, WINDOWS_CERT_PASSWORD
+# Without them the files are unsigned; docs/README.md says how to open them.
+#
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (without the v), for a dry run with no release"
+        required: true
+        default: "0.0.0-test"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+defaults:
+  run:
+    working-directory: .
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        working-directory: .
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ "$EVENT" = "push" ]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+          fi
+
+  macos:
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+      - name: Import the signing certificate (if set)
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        if: env.MACOS_CERT_P12 != ''
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/lectio.keychain-db"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$RUNNER_TEMP" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$RUNNER_TEMP" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$RUNNER_TEMP" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+      - name: Build Lectio.app and the .dmg
+        env:
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: tools/package/macos.sh "$VERSION" --universal
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: dist-release/*.dmg
+          if-no-files-found: error
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+      - name: Install the WiX toolset (for the .msi)
+        continue-on-error: true
+        run: dotnet tool install --global wix --version 5.0.2
+      - name: Build the .zip and .msi
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: ./tools/package/windows.ps1 -Version $env:VERSION
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: |
+            dist-release/*.zip
+            dist-release/*.msi
+          if-no-files-found: error
+
+  linux:
+    needs: version
+    # The oldest supported Ubuntu: an AppImage runs where glibc is the same or newer.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+      - name: Install Linux system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libasound2-dev libpulse-dev \
+            libxkbcommon-dev libwayland-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libgl1-mesa-dev \
+            libpipewire-0.3-dev libspa-0.2-dev libclang-dev clang libdbus-1-dev \
+            libgbm-dev libegl1-mesa-dev libdrm-dev file
+      - name: Build the AppImage
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: tools/package/linux-appimage.sh "$VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: dist-release/*.AppImage
+          if-no-files-found: error
+
+  web:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+      - name: Build the web zip
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: tools/package/web.sh "$VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-web
+          path: dist-release/*.zip
+          if-no-files-found: error
+
+  publish:
+    needs: [version, macos, windows, linux, web]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Checksums
+        working-directory: artifacts
+        run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Lectio ${{ needs.version.outputs.version }}
+          generate_release_notes: true
+          files: artifacts/*
