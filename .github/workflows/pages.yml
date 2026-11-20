@@ -1,0 +1,58 @@
+# The web version on GitHub Pages: https://<user>.github.io/lectio/
+# Deployed from each release tag (so the site matches the latest release) or
+# by hand. Pages serves over https (the microphone needs it) and serves .wasm
+# as application/wasm. The build uses relative URLs (Trunk.toml) and needs no
+# cross-origin isolation headers, which Pages can't set (ADR-010).
+#
+
+name: Web site
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: .
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+      - name: Build the web app
+        run: |
+          trunk build --release
+          rm -f dist/.trunk-lock
+          touch dist/.nojekyll
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

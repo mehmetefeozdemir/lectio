@@ -11,7 +11,7 @@ Every release on the project's GitHub **Releases** page has these files (`<v>` i
 | macOS 11 or newer (Apple Silicon and Intel) | `Lectio-<v>-macos-universal.dmg` | one app for both kinds of Mac |
 | Windows 10 or 11 (64-bit) | `Lectio-<v>-windows-x64.msi` (installer) or `…-windows-x64.zip` (no install) | |
 | Linux (x86-64, glibc 2.39 or newer: Ubuntu 24.04+, Fedora 40+, Debian 13+) | `Lectio-<v>-linux-x86_64.AppImage` | one file, no install |
-| Web | `Lectio-<v>-web.zip` | files to put on your own web server |
+| Web | open **https://mehmetefeozdemir.github.io/lectio/**, or `Lectio-<v>-web.zip` to host it yourself | nothing to install |
 | — | `SHA256SUMS.txt` | checksums of all of the above |
 
 To check a download: `shasum -a 256 <file>` (macOS, Linux) or `Get-FileHash <file>` (Windows PowerShell), and compare
@@ -48,6 +48,10 @@ it with `--appimage-extract-and-run`. Sound comes from PulseAudio or PipeWire, w
 are in `~/.local/share/lectio`.
 
 ## Web
+
+Open https://mehmetefeozdemir.github.io/lectio/ in Chrome, Edge, Firefox or Safari 16.4+. The site is updated with each release.
+
+To host your own copy, unzip the web zip as below.
 Unzip `Lectio-<v>-web.zip` into a folder on any static web host (GitHub Pages, Netlify, a university web space, or
 `python3 -m http.server` for a quick local try). Two rules:
 - Serve it over **https** (or from `localhost`), or the browser won't allow the microphone.

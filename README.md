@@ -4,6 +4,8 @@ Open-source lecture note-taking. Record a class, take notes that are timestamped
 
 One Rust codebase runs as a native app on **Windows, macOS and Linux** and as a **web app** (WebAssembly).
 
+**Try it in your browser: https://mehmetefeozdemir.github.io/lectio/** (no install, notes stay in your browser).
+
 ![Lectio in the browser](shots/web-sample.png)
 
 ## Features
