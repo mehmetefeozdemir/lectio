@@ -68,7 +68,11 @@ fn bad_input_is_an_error_with_a_plain_message() {
     let message = lib.add_course("   ".into()).unwrap_err().to_string();
     assert!(message.contains("name"), "{message}");
     assert!(lib.add_session("not-a-uuid".into(), "S".into()).is_err());
-    assert!(LectioLibrary::open("/definitely/not/writable/lectio".into()).is_err());
+    // A folder can't be made inside a file, on any OS (a path like
+    // /not/writable is writable on Windows runners: it becomes C:\not\writable).
+    let file = folder.0.join("a-file");
+    std::fs::write(&file, b"x").unwrap();
+    assert!(LectioLibrary::open(file.join("lectio").to_string_lossy().into_owned()).is_err());
 }
 
 #[test]
@@ -178,7 +182,8 @@ fn recording_writes_the_desktop_wav_and_attaches_it() {
     let course = lib.add_course("C".into()).unwrap();
     let session = lib.add_session(course, "S".into()).unwrap();
     let path = lib.recording_path(session.clone()).unwrap();
-    assert!(path.ends_with(&format!("recordings/{session}.wav")));
+    // Compare path components, not text: Windows separates them with `\`.
+    assert!(std::path::Path::new(&path).ends_with(std::path::Path::new("recordings").join(format!("{session}.wav"))), "{path}");
 
     let recorder = AudioRecorder::start(path.clone()).unwrap();
     let samples = tone_48k_stereo();

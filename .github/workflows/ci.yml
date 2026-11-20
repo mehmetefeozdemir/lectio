@@ -249,7 +249,7 @@ jobs:
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
 
       - name: Unit tests and the UI test
-        working-directory: app/mobile/ios
+        working-directory: mobile/ios
         run: |
           xcodebuild test -project Lectio.xcodeproj -scheme Lectio \
             -destination "id=${{ steps.simulator.outputs.udid }}" \
@@ -257,7 +257,7 @@ jobs:
 
       - name: Export the Simulator screenshots
         if: always()
-        working-directory: app/mobile/ios
+        working-directory: mobile/ios
         run: |
           mkdir -p build/screenshots
           if [ -d build/Tests.xcresult ]; then
