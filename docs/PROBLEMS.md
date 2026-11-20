@@ -544,3 +544,10 @@ Every bug, dead end and wrong turn while building Lectio, with the root cause, w
   release build showed it first; every build (each target, with and without tests) is worth running before calling a
   change done.
 
+
+## P-044: The Linux desktop screenshots panicked: `libxkbcommon-x11.so could not be loaded`
+- **Phase:** 4b (found in the CI run after Phase 4b)
+- **Symptom:** The CI run was green, but the `native (ubuntu-latest)` job carried an `exit code 101` annotation. The advisory "Desktop screenshots" step had panicked at `xkbcommon-dl-0.4.2/src/x11.rs:59:28: Library libxkbcommon-x11.so could not be loaded.` The step is `continue-on-error`, so the job still passed and `gh run view --log-failed` showed nothing.
+- **Root cause:** On X11 (which Xvfb provides), winit loads the keyboard library `libxkbcommon-x11` with `dlopen` at runtime instead of linking it. The CI installed `libxkbcommon-dev`, which has the headers and the base library but not the X11 part, and the build doesn't notice because nothing links against it.
+- **Fix:** Added `libxkbcommon-x11-0` to the CI's Linux packages.
+- **Lesson:** Libraries opened with `dlopen` don't show up at link time, so only running the app finds them missing. An advisory step that fails still needs reading: a green run with a red annotation is not a clean run.
