@@ -29,8 +29,18 @@ enum AudioProblem: LocalizedError {
 enum AudioSessionSetup {
     static func activate() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP, .allowBluetoothA2DP])
+        try session.setCategory(.playAndRecord, mode: .default, options: bluetoothOptions)
         try session.setActive(true)
+    }
+
+    /// iOS 26's SDK (Swift 6.2, Xcode 26) renamed `.allowBluetooth` to
+    /// `.allowBluetoothHFP`; the same option, so build with either Xcode.
+    private static var bluetoothOptions: AVAudioSession.CategoryOptions {
+        #if compiler(>=6.2)
+        return [.defaultToSpeaker, .allowBluetoothHFP, .allowBluetoothA2DP]
+        #else
+        return [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP]
+        #endif
     }
 
     static func requestMicrophone() async -> Bool {

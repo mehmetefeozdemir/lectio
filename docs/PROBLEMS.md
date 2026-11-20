@@ -627,3 +627,10 @@ Every bug, dead end and wrong turn while building Lectio, with the root cause, w
 - **Root cause:** one `HStack` had too much for a 320-point column; and inside a sidebar `List`, SwiftUI shows `Label` in its icon-only style.
 - **Fix:** course and date on one line; duration and note count on another, each built as an icon plus fixed-size text, combined into one VoiceOver element ("recorded 5 seconds", "1 note").
 - **Lesson:** run the UI test on an iPad, in dark mode and at a large text size, and look at the screenshots: these bugs don't fail an assertion.
+
+## P-056: The iOS CI job failed to compile: `.allowBluetoothHFP` unknown
+- **Phase:** 5a (first CI run of the iOS job)
+- **Symptom:** On the `macos-15` runner, `xcodebuild test` stopped at `AudioSources.swift:32: error: type 'AVAudioSession.CategoryOptions.ArrayLiteralElement' has no member 'allowBluetoothHFP'`. The same code built and ran on my Mac and on an iPhone.
+- **Root cause:** iOS 26's SDK renamed `.allowBluetooth` to `.allowBluetoothHFP` (the old name is deprecated). My Mac has Xcode 27; `macos-15` runners default to Xcode 16, whose SDK only has the old name. CI was building with an older toolchain than development.
+- **Fix:** the option set is chosen at compile time (`#if compiler(>=6.2)`, the Swift version that ships with Xcode 26), so either Xcode builds it; and the iOS job now runs on `macos-26` and selects the newest Xcode on the runner, printing its version.
+- **Lesson:** CI should use the same toolchain generation as development, and print the version it used. Platform SDKs rename APIs between major releases, so a green local build doesn't prove an older SDK can build it.
