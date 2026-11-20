@@ -2,7 +2,8 @@
 //! storing a transcript, and the v3 → v4 migration.
 
 use lectio_core::transcript::{
-    RawSegment, Segment, Transcript, WINDOW_MS, align_window, merged, next_window_start, segment_at, timestamp_ms,
+    RawSegment, Segment, Transcript, WINDOW_MS, after_last_window, align_window, merged, next_window_start, segment_at,
+    timestamp_ms,
 };
 use lectio_core::{Library, ModelError, Recording, SessionId};
 
@@ -151,4 +152,20 @@ fn a_version_3_library_loads_with_no_transcripts_and_default_audio_settings() {
     assert!(!lib.preferences().show_slides, "existing choices survive");
     assert_eq!(lib.preferences().speed_percent, 100);
     assert!(!lib.preferences().filters.any());
+}
+
+#[test]
+fn a_final_window_the_model_ended_early_is_read_again_from_its_last_phrase() {
+    // 25.9 s of speech; the model stopped after a phrase ending at 21.4 s.
+    let early = [raw(0, 9_000, "a"), raw(9_000, 21_400, "b")];
+    assert_eq!(after_last_window(0, &early, 25_900, 25_900), 21_400);
+    assert_eq!(after_last_window(60_000, &early, 25_900, 85_900), 81_400, "on the recording's timeline");
+}
+
+#[test]
+fn a_final_window_that_reached_its_end_or_heard_nothing_finishes() {
+    assert_eq!(after_last_window(0, &[raw(0, 25_900, "a")], 25_900, 25_900), 25_900, "read to the end");
+    assert_eq!(after_last_window(0, &[raw(0, 24_500, "a")], 25_900, 25_900), 25_900, "under 2 s left: a pause");
+    assert_eq!(after_last_window(0, &[], 25_900, 25_900), 25_900, "nothing heard");
+    assert_eq!(after_last_window(0, &[raw(0, 300, "uh")], 25_900, 25_900), 25_900, "too short to move on from");
 }

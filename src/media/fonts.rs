@@ -1,9 +1,8 @@
-//! The bundled font files (see `assets/fonts/README.md`), embedded once and
-//! shared by the UI theme, the formula renderer and the PDF export.
+//! The bundled font files (see `assets/fonts/README.md`). The ones documents
+//! also need live in `lectio_export::fonts` (embedded once, shared with the
+//! exports and the mobile apps); the UI-only fonts are here.
 
-pub const INTER_REGULAR: &[u8] = include_bytes!("../../assets/fonts/Inter-Regular.ttf");
-pub const INTER_SEMIBOLD: &[u8] = include_bytes!("../../assets/fonts/Inter-SemiBold.ttf");
+pub use lectio_export::fonts::{INTER_REGULAR, INTER_SEMIBOLD};
+
 pub const MONO: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
 pub const ICONS: &[u8] = include_bytes!("../../assets/fonts/Phosphor.ttf");
-/// Formulas (ADR-023).
-pub const MATH: &[u8] = include_bytes!("../../assets/fonts/NotoSansMath-Regular.ttf");

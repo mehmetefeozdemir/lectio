@@ -572,3 +572,58 @@ Every bug, dead end and wrong turn while building Lectio, with the root cause, w
 - **Root cause:** linuxdeploy installs the icon into the freedesktop icon theme folders, which only go up to 512×512. The packaging script passed the 1024 px master icon that the macOS script uses to make its `.icns`.
 - **Fix:** Added `assets/icon/lectio-icon-512.png` (downscaled from the master) and the Linux script uses it.
 - **Lesson:** Each step of a release fails only once the step before it works, so release problems come one at a time. Running the release workflow by hand (`workflow_dispatch`, which builds but doesn't publish) let me fix them without moving the tag each time.
+
+## P-048: Whisper base dropped the last sentence of a recording (every platform)
+- **Phase:** 5a (found while measuring Whisper on the iOS Simulator)
+- **Symptom:** On a 25.9 s clip, tiny transcribed every sentence, but base stopped after "…does not need oxygen." and left out the last one, "The other two stages happen inside the mitochondria." No error; the transcript was simply short.
+- **Root cause:** `Transcription::next` (`crates/lectio-speech/src/job.rs`) treated the final window as finished whatever the model did: `start_ms = total_ms`. Base ended its output (end-of-text) after a phrase that closed at 22.8 s, with 3 s of speech still in the window. On earlier windows this case was already handled (the next window starts at the last finished phrase), but not on the last one. The same code runs on the desktop, in the browser worker and on iOS.
+- **Fix:** a pure rule in the core, `lectio_core::transcript::after_last_window`: if the model stopped more than `FINAL_TAIL_MS` (2 s) before the end of the final window, read again from the end of its last phrase; otherwise finish. Two tests (written first) cover both cases and the "too short to move on from" guard that keeps the loop moving forward. The desktop CLI now gives all seven segments for base (real-time factor 0.151, against 0.132 before, on the same Mac).
+- **Lesson:** A check that "it produced text" is not a check that it produced *all* the text. Comparing two models on the same clip showed the gap at once.
+
+## P-049: Whisper runs 4–10× slower on the iOS Simulator than the same code on macOS
+- **Phase:** 5a
+- **Symptom:** On the same Mac (M2) and the same 25.9 s clip, the desktop CLI transcribed with base in 3.9 s; the iOS app in the Simulator took 17.7 s for one window and about 42 s once the final window was read again (P-048). tiny: 6–8 s in the Simulator.
+- **What I checked:** the iOS static library is a release build, and `cargo tree --target aarch64-apple-ios-sim` shows candle's `accelerate` feature on, so the same maths library is linked.
+- **Likely cause (not confirmed):** the Simulator links the Simulator build of Accelerate, which I expect does not use the Mac's matrix hardware the way the macOS build does. The extra final window also costs more there than on macOS.
+- **What I did:** recorded the Simulator numbers as an upper bound and added an opt-in benchmark test (`WhisperBenchmarkTests`) that runs the same Swift → Rust path, so the numbers on a real iPhone can be measured with one command.
+- **Lesson:** Simulator speed is not device speed. Measure in the Simulator only to check that the path works.
+
+## P-050: The generated Swift error printed as `LectioError.Failed(message: "…")`
+- **Phase:** 5a
+- **Symptom:** UniFFI's generated `LectioError` conforms to `LocalizedError`, but its `errorDescription` is `String(reflecting: self)`, so `error.localizedDescription` would have shown the user the enum's debug text.
+- **Fix:** one Swift helper, `errorText(_:)`, pattern-matches `LectioError.Failed(message)` and returns the sentence the core wrote; every view model uses it. A unit test checks it.
+- **Lesson:** Read the generated code before relying on it; the boundary is where "plain English errors" can quietly stop being plain.
+
+## P-051: `result values in '? :' expression have mismatching types 'ToneSource' and 'MicrophoneSource'`
+- **Phase:** 5a
+- **Symptom:** the first Xcode build failed in `LectioApp.swift` on `makeSource: { testAudio ? ToneSource() : MicrophoneSource() }` (and the same for the two outputs).
+- **Root cause:** Swift types each branch of `?:` on its own and doesn't look for a shared protocol, even when the closure's return type is `AudioSource`.
+- **Fix:** `ToneSource() as AudioSource` on one branch.
+- **Lesson:** Protocol types (existentials) have to be named in Swift where Rust's `Box<dyn Trait>` would also need an explicit cast.
+
+## P-052: Moving picture code into a shared crate left code that one target doesn't use
+- **Phase:** 5a
+- **Symptom:** after moving slide text, formulas, ink and photo decoding from the desktop app into `lectio-export` (so mobile makes the same export pictures), Clippy failed the desktop build: `unused import: lectio_export::slide_text::page_text`. Later the new full-bleed icon variant gave `variant FullBleed is never constructed` in non-test builds.
+- **Root cause:** the desktop reads slide text through `lectio_export::slides::all_text` on its render thread; only the browser build still called `page_text` through the re-export. The full-bleed icon is drawn only by the ignored test that writes the icon files.
+- **Fix:** the re-export is compiled only for `wasm32`; the variant carries `#[cfg_attr(not(test), allow(dead_code))]` with a comment saying why.
+- **Lesson:** After a move, lint every target (desktop all-targets and wasm32), not just the one being worked on.
+
+## P-053: The desktop icon can't be the iPhone icon
+- **Phase:** 5a
+- **Symptom:** `assets/icon/lectio-icon.png` is a rounded square with a transparent margin (the macOS style). iOS draws its own rounded mask over a full square, and the App Store refuses icons with an alpha channel, so the desktop icon would show as a small tile with a black border.
+- **Fix:** `src/media/icon.rs` draws the same artwork with a transform that scales the square to fill the canvas, without corners, and writes it as opaque RGB: `assets/icon/lectio-icon-ios.png`. A test checks that every pixel is opaque and that the indigo reaches the corner; the desktop PNG is unchanged byte for byte.
+- **Lesson:** Keeping the icon as code paid off: a second shape was a transform, not a redrawing.
+
+## P-054: Xcode warnings: `building for iOS-simulator-16.0, but linking with dylib … XCTest … built for newer version 17.0`
+- **Phase:** 5a
+- **Symptom:** every build of the test bundles printed five linker warnings; the app also warned that `allowBluetooth` was renamed `allowBluetoothHFP`.
+- **Root cause:** the test bundles inherited the app's iOS 16 deployment target, but current XCTest is built for iOS 17.
+- **Fix:** the two test targets target iOS 17 in `project.yml` (the app still targets 16); the audio session uses `.allowBluetoothHFP`. The build now has no warnings.
+- **Lesson:** a deployment target is per target; tests only ever run on new Simulators.
+
+## P-055: On iPad the lecture row wrapped its time as "0:0 / 5", then showed icons only
+- **Phase:** 5a (seen in the UI test's iPad screenshots, dark mode and extra-extra-large text)
+- **Symptom:** in the narrow split-view sidebar, the row's course, date, duration and note count were in one line, which wrapped mid-number. After giving them their own line, the duration and count showed as icons with no text.
+- **Root cause:** one `HStack` had too much for a 320-point column; and inside a sidebar `List`, SwiftUI shows `Label` in its icon-only style.
+- **Fix:** course and date on one line; duration and note count on another, each built as an icon plus fixed-size text, combined into one VoiceOver element ("recorded 5 seconds", "1 note").
+- **Lesson:** run the UI test on an iPad, in dark mode and at a large text size, and look at the screenshots: these bugs don't fail an assertion.

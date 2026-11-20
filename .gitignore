@@ -1,3 +1,11 @@
 # trunk's web build output
 dist/
 dist-release/
+
+# iOS: made by tools/mobile/build-ios.sh (ADR-030), never committed
+mobile/ios/Generated/
+mobile/ios/Lectio.xcodeproj/
+mobile/ios/Lectio/Info.plist
+mobile/ios/Lectio/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+mobile/ios/build/
+xcuserdata/

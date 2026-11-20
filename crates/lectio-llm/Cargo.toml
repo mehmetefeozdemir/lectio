@@ -22,6 +22,6 @@ tokenizers = { version = "0.22", default-features = false, features = ["fancy-re
 tokenizers = { version = "0.22", default-features = false, features = ["unstable_wasm"] }
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 candle-core = { version = "0.11", features = ["accelerate"] }
 candle-transformers = { version = "0.11", features = ["accelerate"] }

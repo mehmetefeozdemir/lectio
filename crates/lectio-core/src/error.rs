@@ -25,6 +25,8 @@ pub enum ModelError {
     CollectionNotFound,
     InvalidInk(String),
     InvalidFormula(String),
+    /// Text that should be an id isn't one (mobile apps pass ids as text).
+    InvalidId,
 }
 
 impl fmt::Display for ModelError {
@@ -59,6 +61,7 @@ impl fmt::Display for ModelError {
             Self::CollectionNotFound => write!(f, "That collection no longer exists."),
             Self::InvalidInk(why) => write!(f, "{why}"),
             Self::InvalidFormula(why) => write!(f, "The formula can't be read: {why}"),
+            Self::InvalidId => write!(f, "That item can't be found (its id isn't valid)."),
         }
     }
 }

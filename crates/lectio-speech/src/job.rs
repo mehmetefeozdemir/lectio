@@ -4,7 +4,7 @@
 //! them) and can stop between windows. The worker also pauses between
 //! windows so a "stop" message can reach it.
 
-use lectio_core::transcript::{Segment, WINDOW_MS, align_window, next_window_start};
+use lectio_core::transcript::{Segment, WINDOW_MS, after_last_window, align_window, next_window_start};
 
 use crate::engine::Engine;
 use crate::mel::SAMPLE_RATE;
@@ -52,7 +52,11 @@ impl Transcription {
         let language = self.language.get_or_insert(result.language).clone();
         let segments = align_window(self.start_ms, &result.segments, self.total_ms);
         let start = self.start_ms;
-        self.start_ms = if last { self.total_ms } else { next_window_start(start, &result.segments, window_ms) };
+        self.start_ms = if last {
+            after_last_window(start, &result.segments, window_ms, self.total_ms)
+        } else {
+            next_window_start(start, &result.segments, window_ms)
+        };
         Ok(Some(WindowDone { segments, done_ms: self.start_ms.min(self.total_ms), total_ms: self.total_ms, language }))
     }
 }

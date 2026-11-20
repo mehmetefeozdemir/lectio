@@ -2,7 +2,8 @@
 
 Lectio is a lecture note-taking app: record a class, take notes stamped with the moment in the recording, add slides,
 photos, sketches and formulas, transcribe the audio on your own computer, and study from it. It runs on macOS, Windows,
-Linux and in a web browser, from one Rust codebase. Your notes stay on your device; there is no account.
+Linux and in a web browser from one Rust codebase, and on iPhone and iPad as a native app over the same Rust core
+(built from source, see below). Your notes stay on your device; there is no account.
 
 Every release on the project's GitHub **Releases** page has these files (`<v>` is the version, e.g. `0.4.0`):
 
@@ -60,6 +61,55 @@ Unzip `Lectio-<v>-web.zip` into a folder on any static web host (GitHub Pages, N
 Notes are stored in that browser, for that web address only (IndexedDB). Clearing the site's data deletes them, so use
 **Export** in the paper view to keep copies. Chrome, Edge and Firefox work; Safari 16.4 or newer.
 
+## iPhone and iPad (build it yourself)
+The iOS app is not on the App Store; you build it on a Mac and run it in the Simulator or on your own iPhone or iPad
+(iOS 16 or newer). It keeps its notes in the same layout as the desktop app.
+
+**You need:** a Mac with Xcode (16 or newer, from the App Store; open it once to install its components) and Rust
+(https://rustup.rs). From the `` folder:
+```sh
+tools/mobile/build-ios.sh
+```
+This builds the shared Rust core for iPhone and the Simulator, writes the Swift bindings, downloads a checked copy of
+XcodeGen into `target/tools/`, and generates `mobile/ios/Lectio.xcodeproj`. The first run takes 15–25 minutes (it
+compiles the speech and study models' code three times); later runs only rebuild what changed. After editing only
+`mobile/ios/project.yml`, `tools/mobile/build-ios.sh project` regenerates the project in seconds.
+
+### In the Simulator
+1. Open `mobile/ios/Lectio.xcodeproj` in Xcode.
+2. At the top of the window choose the **Lectio** scheme and a Simulator, e.g. **iPhone 17** or an iPad.
+3. Press **⌘R**. The Simulator records from your Mac's microphone (macOS asks for permission the first time).
+
+Tests, from `mobile/ios`:
+```sh
+xcodebuild test -project Lectio.xcodeproj -scheme Lectio -destination 'platform=iOS Simulator,name=iPhone 17'
+```
+This runs the view-model tests and the UI test (course → lecture → record → note → play → export). The UI test's
+screenshots are in the result bundle: `xcrun xcresulttool export attachments --path <bundle>.xcresult --output-path shots`.
+
+### On your iPhone with a free Apple ID ("Personal Team")
+No paid developer account is needed. No team id or certificate is stored in the repository; you choose your own team
+in Xcode.
+1. Xcode › **Settings** › **Accounts** › **+** › **Apple ID**, and sign in. Xcode creates "*Your Name* (Personal Team)".
+2. Connect the iPhone with a cable, unlock it, and tap **Trust** on the phone.
+3. Turn on Developer Mode on the phone: **Settings › Privacy & Security › Developer Mode** › on, then restart the phone
+   when asked. (The switch appears after the phone has been connected to Xcode once.)
+4. In Xcode, click the **Lectio** project › target **Lectio** › **Signing & Capabilities**: keep **Automatically manage
+   signing** on and pick your **Personal Team**.
+5. If Xcode says the bundle identifier `org.lectio.Lectio` "is not available", someone else's team already uses it:
+   change it there to something unique, e.g. `org.lectio.Lectio.yourname`. This change lives in the generated project
+   only, so it isn't committed (run step 4 again after regenerating the project).
+6. Choose your iPhone at the top of the window and press **⌘R**.
+7. The first time, the phone refuses to open an app from an "Untrusted Developer": **Settings › General › VPN & Device
+   Management** › your Apple ID › **Trust**. Then open Lectio.
+
+With a free team the app stops opening after **7 days**; run it from Xcode again to renew it (your notes stay). A free
+team can have up to 3 such apps on a device at once.
+
+**Speed on a real device:** record a lecture, open **Transcript**, choose a model and tap **Transcribe**; when it is done
+the screen shows how long it took and the speed against real time. The first run downloads the model (tiny 151 MB,
+base 290 MB) over Wi-Fi.
+
 ## Build from source
 Needs Rust (stable, via rustup). From the `` folder:
 ```sh
@@ -80,3 +130,5 @@ headers).
   between controls, and the screen reader announces each one.
 - 200% zoom: Ctrl/⌘ + plus on the desktop, or the browser's zoom; the layout switches to tabs when space runs out.
 - Drawing on slides needs a mouse, pen or touch; everything else works from the keyboard.
+- iPhone and iPad: VoiceOver reads every control (a note's time button says "Play from 1 minute, 5 seconds"; formulas
+  are read as their LaTeX), text follows the Larger Text setting, and the app follows dark mode.

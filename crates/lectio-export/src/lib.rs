@@ -2,13 +2,23 @@
 //! (`lectio_core::paper`) as an HTML page (the browser prints it), a Word
 //! document (.docx) and a PDF. Markdown is written by `lectio_core::paper`.
 //!
-//! Pictures (slide pages with their ink, photos, sketches, formulas) are
-//! rendered by the app first and passed in as PNG bytes, so this crate has
-//! no UI or platform code and is tested on its own.
+//! The pictures in a document (slide pages with their ink, photos, sketches,
+//! formulas) are made by `pictures` from the stored files and passed to the
+//! writers as PNG bytes. The crate has no UI or platform code, so the desktop
+//! app, the web app and the mobile apps (ADR-029) all share it, and it is
+//! tested on its own.
 
 mod docx;
+pub mod fonts;
+pub mod formula;
 mod html;
+pub mod images;
+pub mod ink;
 mod pdf;
+pub mod pictures;
+pub mod raster;
+pub mod slide_text;
+pub mod slides;
 
 use std::collections::HashMap;
 

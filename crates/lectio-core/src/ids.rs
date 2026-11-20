@@ -21,7 +21,28 @@ macro_rules! id_type {
                 self.0.fmt(f)
             }
         }
+
+        /// The mobile apps pass ids as text (ADR-029).
+        impl std::str::FromStr for $name {
+            type Err = crate::ModelError;
+
+            fn from_str(text: &str) -> Result<Self, Self::Err> {
+                Uuid::parse_str(text.trim()).map(Self).map_err(|_| crate::ModelError::InvalidId)
+            }
+        }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ids_read_back_from_their_text() {
+        let id = SessionId::new_random();
+        assert_eq!(id.to_string().parse::<SessionId>(), Ok(id));
+        assert_eq!("not-an-id".parse::<SessionId>(), Err(crate::ModelError::InvalidId));
+    }
 }
 
 id_type!(CourseId);

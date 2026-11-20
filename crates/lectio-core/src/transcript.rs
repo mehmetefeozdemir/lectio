@@ -83,6 +83,21 @@ fn clean_text(text: &str) -> String {
     text
 }
 
+/// Audio left after the last phrase of the final window that is shorter
+/// than this is a pause, not speech the model skipped.
+pub const FINAL_TAIL_MS: u64 = 2_000;
+
+/// Where to go after the final window: the end of the recording, unless the
+/// model stopped with more than `FINAL_TAIL_MS` left after its last phrase
+/// (Whisper sometimes ends a window early); then that audio is read again,
+/// from the end of the phrase.
+pub fn after_last_window(window_start_ms: u64, raw: &[RawSegment], window_len_ms: u64, total_ms: u64) -> u64 {
+    match raw.last() {
+        Some(last) if last.end_ms >= MIN_STEP_MS && last.end_ms + FINAL_TAIL_MS < window_len_ms => window_start_ms + last.end_ms,
+        _ => total_ms,
+    }
+}
+
 /// Where the next window starts: right after the last phrase the model
 /// finished, or after the whole window if it heard nothing.
 /// `window_len_ms` is how much audio the window really had (the last one

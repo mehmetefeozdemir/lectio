@@ -1,8 +1,7 @@
 # Architecture
 
-> Updated after each phase. Current state: **end of Phase 4b (Polish and ship)**: formulas, slide ink, the paper view
-> with PDF/DOCX export, collections, the browser screen-reader layer, CI proof and releases, on top of Phases 1–4a (see
-> "Phase 4b" at the end).
+> Updated after each phase. Current state: **end of Phase 5a (Mobile, iOS first)**: a native SwiftUI app for iPhone and
+> iPad over the same Rust core through UniFFI (`lectio-ffi`), on top of Phases 1–4b (see "Phase 5a" at the end).
 
 ## Stack
 Rust 2024 edition, **one codebase for Windows, macOS, Linux and the web** (ADR-010). UI with **eframe/egui 0.37** (ADR-003),
@@ -10,6 +9,11 @@ native in a window and WebAssembly on a `<canvas>` in the browser. Everything pl
 file picking, blobs, camera) sits behind traits in `src/platform/mod.rs`. Domain logic lives in `lectio-core`, a crate with no
 UI, audio or platform code that CI also compiles for `wasm32-unknown-unknown`. Phase 2 media code is shared by all targets:
 PDF slides with **hayro** (ADR-011), photos with **image**, sketches with **tiny-skia**, dialogs with **rfd** (ADR-013).
+
+Phase 5a adds **iPhone and iPad**: a native **SwiftUI** app (`mobile/ios`) over the same Rust crates, called through
+**UniFFI** bindings generated from `crates/lectio-ffi` (ADR-029). Rust keeps the data model, the storage format, seek and
+time-stretch, exports, Whisper and the study model; Swift owns the screens, the audio session, the camera and the share
+sheet. The Android app (5b) will use the same `lectio-ffi` with Kotlin bindings.
 
 ## Platform boundary
 ```mermaid
@@ -75,7 +79,10 @@ lectio/
 │                              #   linux-appimage.sh, web.sh; used by release.yml and runnable locally
 ├── assets/sample-slides.pdf   # 2-page deck for sample data, tests and the browser flow
 ├── assets/fonts/              # Inter, JetBrains Mono, Noto Sans Math (OFL), Phosphor icons (MIT); sources in README.md
-├── assets/icon/               # Phase 4b: lectio-icon.png (drawn by src/media/icon.rs) for the installers
+├── assets/icon/               # Phase 4b: lectio-icon.png (drawn by src/media/icon.rs) for the installers; Phase 5a:
+│                              #   lectio-icon-ios.png (full-bleed, opaque) for iPhone and iPad
+├── mobile/ios/                # Phase 5a (ADR-029, ADR-030): the SwiftUI app; see "Phase 5a" for its files
+├── tools/mobile/build-ios.sh  # Phase 5a: XCFramework (device + Simulator), Swift bindings, Xcode project (XcodeGen)
 ├── crates/lectio-core/        # pure domain logic: no UI, no audio I/O, no platform code
 │   ├── src/
 │   │   ├── lib.rs             # public API, MAX_NAME_CHARS
@@ -123,7 +130,16 @@ lectio/
 │   └── src/                   # models.rs (files, pinned revisions, SHA-256), engine.rs (chat template, greedy
 │                              #   decoding with a repeat penalty), protocol.rs (page ↔ study worker messages)
 ├── crates/lectio-export/      # Phase 4b (ADR-025): paper blocks → HTML (print), DOCX (hand-written OOXML), PDF
-│                              #   (krilla); tests read the files back (zip, hayro)
+│                              #   (krilla); tests read the files back (zip, hayro). Phase 5a: also the pictures the
+│                              #   exports need, shared by desktop and mobile: formula.rs (LaTeX → image), slides.rs
+│                              #   (hayro pages), slide_text.rs, ink.rs (strokes over a page), images.rs (EXIF-upright
+│                              #   photos), raster.rs (RGBA ↔ PNG), fonts.rs, pictures.rs (all pictures for a document)
+├── crates/lectio-ffi/         # Phase 5a (ADR-029): the UniFFI surface for the mobile apps. library.rs (open a data
+│                              #   folder, courses, sessions, notes, collections, search), material.rs (recordings,
+│                              #   slides, ink, photos), study.rs (offline quiz, SM-2 cards), export.rs, audio.rs
+│                              #   (AudioRecorder → desktop WAV, AudioPlayer with WSOLA speed), draft.rs (NoteDraft),
+│                              #   engines.rs (SpeechEngine, StudyEngine, ProgressListener), models.rs (files + SHA-256
+│                              #   check); bin/uniffi-bindgen.rs; tests/ffi_tests.rs (12 tests)
 ├── crates/lectio-worker/      # the browser's Web Worker (wasm only; empty on desktop): Whisper (Phase 3), and in a
 │                              #   second copy the study model and the dictionary index (Phase 4a, study.rs)
 ├── src/
@@ -143,9 +159,9 @@ lectio/
 │   ├── app/collection_actions.rs # Phase 4b: collections, Home filter and sort
 │   ├── action.rs              # Action enum: everything the UI can ask for
 │   ├── material.rs            # Phase 2 runtime state: pending imports, Viewer, image/slide texture caches, camera
-│   ├── media/                 # slides.rs (hayro, DeckRenderer: pages + text), slide_text.rs (text device),
-│   │                          #   images.rs (EXIF-upright decode, JPEG), sketch.rs (PNG); Phase 4b: math.rs (formula →
-│   │                          #   image with ab_glyph + tiny-skia), ink.rs (strokes over a page → PNG), icon.rs, fonts.rs
+│   ├── media/                 # slides.rs (DeckRenderer: pages + text), images.rs (decode → texture), sketch.rs (PNG),
+│   │                          #   icon.rs, fonts.rs; Phase 5a: the picture code itself moved to lectio-export, these
+│   │                          #   files wrap it for egui (slide_text.rs, math.rs, ink.rs are re-exports)
 │   ├── platform/
 │   │   ├── mod.rs             # traits Platform / AudioCapture / AudioPlayback / CameraSession, Pending, FileKind,
 │   │   │                      #   CaptureSource
@@ -901,3 +917,157 @@ the files and their SHA-256 sums to a GitHub release. Install steps are in `docs
 - Exports run on the main thread one picture per frame: a deck with many slides takes a few seconds to prepare.
 - The CI screenshot, audio and release jobs were written and checked locally (YAML, the macOS and web packaging scripts),
   but can only run on GitHub.
+
+## Phase 5a: mobile, iOS first
+
+### The split between Rust and Swift (ADR-029)
+```mermaid
+flowchart TB
+  subgraph swift["SwiftUI app (mobile/ios/Lectio)"]
+    V["Views: Home, Session (Notes, Slides, Transcript, Study), formula editor, camera, share sheet"]
+    VM["View models (@MainActor ObservableObject): HomeModel, SessionModel, StudyModel, TranscriptionModel"]
+    AU["Audio: AVAudioSession, MicrophoneSource (AVAudioEngine tap), RecorderModel, EngineOutput (AVAudioPlayerNode), PlayerModel"]
+    MS["ModelStore: URLSession downloads → models/&lt;folder&gt;/"]
+    V --> VM
+    V --> AU
+    VM --> MS
+  end
+  subgraph gen["Generated (tools/mobile/build-ios.sh)"]
+    B["lectio_ffi.swift (UniFFI bindings)"]
+    X["LectioCore.xcframework: liblectio_ffi.a for iOS arm64 + Simulator arm64/x86_64, C header"]
+  end
+  subgraph rust["Rust (crates/)"]
+    F["lectio-ffi: LectioLibrary, AudioRecorder, AudioPlayer, NoteDraft, SpeechEngine, StudyEngine, export, verify_download"]
+    C["lectio-core: model, storage + migrations, seek, NoteDraft, SpeechConverter, TimeStretcher, quiz, cards, search, ink, math"]
+    E["lectio-export: PDF, DOCX, Markdown + their pictures"]
+    S["lectio-speech: Whisper (candle + Accelerate)"]
+    L["lectio-llm: Qwen2.5 (candle + Accelerate)"]
+    F --> C
+    F --> E
+    F --> S
+    F --> L
+  end
+  VM --> B
+  AU --> B
+  MS -->|"verify_download (size + SHA-256)"| B
+  B --> X --> F
+```
+| Stays in Rust (shared with desktop, web and Android) | Native (Swift now, Kotlin in 5b) |
+|---|---|
+| Data model, `library.json` format and migrations, blob store | Screens, navigation, Dynamic Type, VoiceOver |
+| Microphone samples → 16 kHz mono 16-bit WAV (`SpeechConverter`) | Audio session, interruptions, route changes, background audio |
+| Playback blocks at 50–200 % (WSOLA `TimeStretcher`), seek | Scheduling blocks on `AVAudioPlayerNode` |
+| Note stamping (`NoteDraft`: the moment typing started) | Text input |
+| Slide import checks, slide text for search, ink storage + eraser hit test | Page drawing (PDFKit), ink drawing (Canvas), gestures |
+| Formula parsing and drawing (preview PNG) | The formula text field and its snippet buttons |
+| Exports (PDF, DOCX, Markdown and their pictures) | Share sheet |
+| Whisper, the study model, prompts, parsers, citation checks | Model downloads (URLSession), progress UI |
+| Quiz grading, SM-2 cards, search | Camera and photo picker (photos stored as JPEG) |
+
+Everything crosses the boundary as plain values: ids as text, times as milliseconds, bytes as `Data`. Errors are one
+`LectioError.Failed(message)` whose message is already written for the user.
+
+### On disk: the same layout as the desktop
+The app keeps its library in `Application Support/Lectio/`: `library.json`, `recordings/<session-id>.wav` (16 kHz mono
+16-bit), `blobs/<uuid>.pdf|jpg|png`, `models/whisper-<size>/`, `models/qwen2.5-…/`. Every write goes through
+`lectio-core`'s `JsonFileStore` and `FileBlobStore` (atomic), so a library copied between a phone and a computer opens
+on both. The FFI tests check this by opening an FFI-written folder with the desktop's store.
+
+### Record → note → stop (iOS)
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant R as RecorderModel (Swift)
+  participant M as MicrophoneSource (AVAudioEngine)
+  participant A as AudioRecorder (Rust)
+  participant L as LectioLibrary (Rust)
+  U->>R: Record
+  R->>R: microphone permission, AVAudioSession playAndRecord
+  R->>L: recording_path(session) → recordings/<id>.wav
+  R->>A: AudioRecorder.start(path)
+  R->>M: start(sink)
+  loop every tap buffer (any rate, any channels)
+    M->>A: push(samples, rate, channels) on the audio thread
+    A->>A: SpeechConverter → 16 kHz mono → i16 → WAV
+  end
+  R->>A: duration_ms() every 200 ms (shown, and the clock for notes)
+  U->>R: types a note (NoteDraft remembers when typing started), Add
+  R->>L: add_note(session, offset = typing start, text, labels)
+  Note over M,A: Call or Siri: input stops, state "interrupted"; on "ended" (or Resume) the same file carries on.<br/>AirPods in or out: the engine restarts the tap with the new format; Rust starts a new converter.
+  U->>R: Stop
+  R->>A: finish() → duration
+  R->>L: attach_recording(session, duration)
+```
+
+### Playback → tap a note → seek (iOS)
+`PlayerModel` opens the WAV with Rust's `AudioPlayer`. `EngineOutput` keeps three blocks of 2048 samples (128 ms each)
+queued on an `AVAudioPlayerNode`; each block that finishes asks Rust for the next one, which `TimeStretcher` makes at the
+chosen speed. Tapping a note's time calls `seek_ms(offset)` and restarts the output, so queued blocks from the old
+position are dropped (a generation number ignores their callbacks). Unplugging headphones pauses playback.
+
+### Transcribe and study on the device
+`ModelStore` downloads the pinned files (the desktop's URLs and SHA-256 sums, read from Rust) into
+`models/<folder>/<file>.partial`, has Rust check the size and hash, then moves them into place. `SpeechEngine` runs the
+desktop's Whisper job and saves each 30-second window's segments as it finishes; `StudyEngine` runs the desktop's
+outline and quiz pipeline (chunking, prompts, parsers, citation checks). Both report progress through a Swift
+`ProgressListener`, which can also stop them. candle uses Apple's Accelerate framework on iOS as on macOS.
+
+If the model ends the final window early with speech still left (more than 2 s after its last phrase), the job reads
+that audio again from the end of the phrase (`lectio_core::transcript::after_last_window`, P-048); this applies to the
+desktop and the browser too.
+
+**Measured speed** (25.9 s of speech made with the macOS `say` voice; MacBook Air M2; `WhisperBenchmarkTests` for the
+Simulator, `lectio --transcribe` for the desktop):
+
+| model | iOS Simulator (iPhone 17, iOS 27.2) | desktop on the same Mac |
+|---|---|---|
+| tiny | 6.1–8.2 s (3–4× faster than real time), all 7 sentences | — |
+| base | 17.7 s for one window (before P-048's fix, last sentence missing); 41–44 s with the final window read again | 3.9 s, all 7 sentences |
+
+The Simulator runs the Mac's processor through the Simulator's own libraries and is several times slower than the
+desktop build (P-049), so these are not phone numbers; a real iPhone is needed for those, and the same test measures
+them.
+
+### Building it
+`tools/mobile/build-ios.sh` builds `lectio-ffi` as a static library for `aarch64-apple-ios`, `aarch64-apple-ios-sim`
+and `x86_64-apple-ios` (`cargo rustc --crate-type staticlib`, so ordinary builds stay a plain Rust library), joins the
+two Simulator slices with `lipo`, has `uniffi-bindgen` write the Swift bindings from the device library, packs
+`LectioCore.xcframework`, and runs a pinned XcodeGen (checked by SHA-256) on `mobile/ios/project.yml` (ADR-030). CI does
+the same on macOS, runs the XCTests and the UI test on an iPhone Simulator, and uploads the UI test's screenshots; a Linux
+job generates the Kotlin bindings as a check for Android.
+
+```
+mobile/ios/
+├── project.yml                # XcodeGen spec: app + unit tests + UI tests, iOS 16+, iPhone and iPad, usage strings
+├── Lectio/
+│   ├── App/LectioApp.swift    # launch options (UI-test library and test audio), AppModel, Startup, @main
+│   ├── Support/Formatting.swift # errorText, TimeText (clock + spoken), label and ink styles, ShareSheet
+│   ├── Audio/                 # AudioSources.swift (session setup, MicrophoneSource, ToneSource), RecorderModel.swift,
+│   │                          #   PlayerModel.swift (AudioOutput, EngineOutput, ClockOutput, PlayerModel)
+│   ├── Models/                # HomeModel, SessionModel, StudyModel, TranscriptionModel, ModelStore (+ JobProgress)
+│   ├── Views/                 # HomeView (RootView split view, NewLectureSheet), SessionView (AudioBar, ExportMenu),
+│   │                          #   NoteFeedView (rows, composer, FormulaEditor, CameraPicker), SlidesView (PDFKit + ink),
+│   │                          #   TranscriptView (+ StudyView)
+│   └── Assets.xcassets        # AppIcon (copied from assets/icon by the build script), AccentColor (light + dark)
+├── LectioTests/               # XCTest: Home, Session, Study, Recorder, Player view models; formatting; Whisper benchmark
+├── LectioUITests/             # CoreFlowUITests: course → lecture → record 3 s + note → play from note → export PDF
+└── Generated/, Lectio.xcodeproj, build/   # made by the build script, not committed
+```
+
+### Phase 5a accessibility
+- Every control has a VoiceOver label; icon-only buttons (play, speed, page arrows, ink tools, add note) say what they
+  do, a note's time button says "Play from 1 minute, 5 seconds", formulas are read as their LaTeX, label chips as
+  "Labels: Important, Review", session rows as one element.
+- Reading order follows the screen: audio bar, section tabs, content, composer.
+- Text uses the system text styles, so it follows Dynamic Type; the formula preview scales with it (`@ScaledMetric`).
+- Colours are semantic (light and dark); the accent colour has a lighter dark-mode variant.
+- Things that happen off-screen (note added, export ready) are announced.
+
+### Phase 5a known limitations
+- The phone keeps its own library; moving notes between devices waits for sync (5c).
+- Photos are stored as JPEG; sketches, screen recording, word look-up (the dictionary), tasks and the focus timer are
+  desktop-only for now (their rules are in the core, ready to be exposed through `lectio-ffi`).
+- Model downloads run while the app is open (not as background transfers).
+- The study model's small size (0.5B) is the only one offered on the phone; the larger one needs more memory than many
+  iPhones give an app.
+- Simulator timings use the Mac's processor; real numbers need a device.

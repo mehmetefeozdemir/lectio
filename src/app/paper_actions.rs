@@ -9,20 +9,14 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use lectio_core::DeckId;
+use lectio_core::material::BlobKey;
 use lectio_core::paper::{AssetKey, Block, PaperOptions, assets, document, markdown};
-use lectio_export::{Fonts, Picture, Pictures};
+use lectio_export::pictures::{blob_for, picture_for};
+use lectio_export::{Fonts, Pictures};
 
 use super::*;
-use crate::media::{fonts, images, ink, math, slides};
+use crate::media::fonts;
 use crate::platform::{DocFormat, Pending};
-
-/// Formulas are drawn at twice their shown size, for sharp printing.
-const FORMULA_PX: f32 = 40.0;
-/// Pictures are shown at most this wide in exports (CSS pixels).
-const PICTURE_WIDTH: u32 = 640;
-/// Photos are scaled down to this before they go into a document.
-const PHOTO_MAX_SIDE: u32 = 1_600;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportTarget {
@@ -39,7 +33,8 @@ pub struct ExportJob {
     options: PaperOptions,
     todo: VecDeque<AssetKey>,
     waiting: Option<(AssetKey, Pending<Vec<u8>>)>,
-    decks: HashMap<DeckId, Vec<u8>>,
+    /// Stored files read so far (a deck is read once for all its pages).
+    files: HashMap<BlobKey, Vec<u8>>,
     pictures: Pictures,
     total: usize,
 }
@@ -60,12 +55,6 @@ pub struct PaperState {
     pub formula_mode: bool,
     pub options: PaperOptions,
     pub job: Option<ExportJob>,
-}
-
-/// A picture of `width × height` pixels shown at most `PICTURE_WIDTH` wide.
-fn shown(png: Vec<u8>, width: u32, height: u32, max: u32) -> Picture {
-    let w = width.min(max).max(1);
-    Picture { png, width: w, height: (u64::from(height) * u64::from(w) / u64::from(width.max(1))) as u32 }
 }
 
 fn file_name(title: &str, format: DocFormat) -> String {
@@ -119,7 +108,7 @@ impl LectioApp {
             options: self.paper.options,
             todo,
             waiting: None,
-            decks: HashMap::new(),
+            files: HashMap::new(),
             pictures: HashMap::new(),
             total,
         });
@@ -144,62 +133,34 @@ impl LectioApp {
         true
     }
 
+    /// Makes a picture with `lectio_export::pictures` (shared with the mobile
+    /// apps), or first asks for the stored file it needs. A picture that can't
+    /// be made is left out; its text stays.
     fn make_picture(&mut self, job: &mut ExportJob, key: AssetKey) {
-        match &key {
-            AssetKey::Formula(latex) => {
-                // A formula that can't be drawn keeps its LaTeX text instead.
-                if let Ok((png, w, h)) = math::png(latex, FORMULA_PX) {
-                    job.pictures.insert(key, Picture { png, width: w / 2, height: h / 2 });
-                }
-            }
-            AssetKey::Slide(deck, page) => match job.decks.get(deck) {
-                Some(bytes) => {
-                    let strokes = self.library.session(job.session).and_then(|s| s.decks.iter().find(|d| d.id == *deck)).map(|d| d.ink_on(*page).to_vec());
-                    let made = slides::render_one(bytes, *page).and_then(|image| {
-                        let [w, h] = image.size;
-                        ink::page_png(&image, &strokes.unwrap_or_default()).map(|png| shown(png, w as u32, h as u32, PICTURE_WIDTH))
-                    });
-                    if let Ok(picture) = made {
-                        job.pictures.insert(key, picture);
+        let Some(session) = self.library.session(job.session) else { return };
+        let made = match blob_for(&key, session) {
+            None => picture_for(&key, session, None),
+            Some(blob) => match job.files.get(&blob) {
+                Some(bytes) => picture_for(&key, session, Some(bytes)),
+                None => {
+                    if let Some(platform) = self.platform.as_ref() {
+                        job.waiting = Some((key, platform.get_blob(&blob)));
                     }
+                    return;
                 }
-                None => self.request_blob(job, key),
             },
-            AssetKey::Image(_) => self.request_blob(job, key),
-        }
-    }
-
-    /// Asks for the stored file behind a slide deck or photo.
-    fn request_blob(&mut self, job: &mut ExportJob, key: AssetKey) {
-        let blob = match &key {
-            AssetKey::Slide(deck, _) => self.library.session(job.session).and_then(|s| s.decks.iter().find(|d| d.id == *deck)).map(|d| d.blob.clone()),
-            AssetKey::Image(blob) => Some(blob.clone()),
-            AssetKey::Formula(_) => None,
         };
-        if let (Some(blob), Some(platform)) = (blob, self.platform.as_ref()) {
-            job.waiting = Some((key, platform.get_blob(&blob)));
+        if let Ok(picture) = made {
+            job.pictures.insert(key, picture);
         }
     }
 
+    /// A stored file arrived: keep it and make the picture next frame.
     fn loaded(&mut self, job: &mut ExportJob, key: AssetKey, result: Result<Vec<u8>, String>) {
-        // A missing file leaves its picture out; the text stays.
         let Ok(bytes) = result else { return };
-        match key {
-            AssetKey::Slide(deck, page) => {
-                job.decks.insert(deck, bytes);
-                job.todo.push_front(AssetKey::Slide(deck, page));
-            }
-            AssetKey::Image(blob) => {
-                let made = images::decode_for_display(&bytes, PHOTO_MAX_SIDE).and_then(|image| {
-                    let [w, h] = image.size;
-                    ink::page_png(&image, &[]).map(|png| shown(png, w as u32, h as u32, PICTURE_WIDTH))
-                });
-                if let Ok(picture) = made {
-                    job.pictures.insert(AssetKey::Image(blob), picture);
-                }
-            }
-            AssetKey::Formula(_) => {}
-        }
+        let Some(blob) = self.library.session(job.session).and_then(|s| blob_for(&key, s)) else { return };
+        job.files.insert(blob, bytes);
+        job.todo.push_front(key);
     }
 
     fn finish_export(&mut self, job: ExportJob) {
@@ -231,11 +192,4 @@ mod tests {
         assert_eq!(file_name("Notes", DocFormat::Docx), "Notes.docx");
     }
 
-    #[test]
-    fn pictures_are_shown_at_most_the_column_width_keeping_their_shape() {
-        let p = shown(vec![], 1_400, 1_050, 640);
-        assert_eq!((p.width, p.height), (640, 480));
-        let small = shown(vec![], 300, 200, 640);
-        assert_eq!((small.width, small.height), (300, 200));
-    }
 }

@@ -1,0 +1,108 @@
+# The Xcode project for Lectio on iPhone and iPad (ADR-030). XcodeGen turns
+# this file into Lectio.xcodeproj, which is not committed:
+#
+#   tools/mobile/build-ios.sh            Rust core + bindings + this project
+#   tools/mobile/build-ios.sh project    only this project
+#
+# No signing team is set here. For a real device, pick your own (free)
+# personal team in Xcode under Signing & Capabilities; see docs/README.md.
+name: Lectio
+
+options:
+  bundleIdPrefix: org.lectio
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+
+targets:
+  Lectio:
+    type: application
+    platform: iOS
+    sources:
+      - path: Lectio
+      - path: Generated/lectio_ffi.swift
+        group: Generated
+    dependencies:
+      # The shared Rust core (static library + C header), built by
+      # tools/mobile/build-ios.sh.
+      - framework: Generated/LectioCore.xcframework
+        embed: false
+      - sdk: Accelerate.framework
+    info:
+      path: Lectio/Info.plist
+      properties:
+        CFBundleDisplayName: Lectio
+        UILaunchScreen: {}
+        UIBackgroundModes: [audio]
+        UIApplicationSupportsIndirectInputEvents: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSMicrophoneUsageDescription: Lectio records the lecture so each note can play back the moment it was written.
+        NSCameraUsageDescription: Lectio takes photos of the board or a handout and adds them to your notes.
+        NSPhotoLibraryUsageDescription: Lectio adds photos you choose to your notes.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.lectio.Lectio
+        PRODUCT_NAME: Lectio
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        # Libraries the Rust static library needs (a static library can't
+        # carry its own link list into Xcode).
+        OTHER_LDFLAGS: ["-framework", "Accelerate", "-framework", "Security", "-framework", "SystemConfiguration", "-lc++"]
+
+  LectioTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [LectioTests]
+    dependencies:
+      - target: Lectio
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.lectio.LectioTests
+        GENERATE_INFOPLIST_FILE: YES
+        # Current XCTest needs iOS 17; the app itself still runs on 16.
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+
+  LectioUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [LectioUITests]
+    dependencies:
+      - target: Lectio
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.lectio.LectioUITests
+        GENERATE_INFOPLIST_FILE: YES
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        TEST_TARGET_NAME: Lectio
+
+schemes:
+  Lectio:
+    build:
+      targets:
+        Lectio: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: true
+      targets:
+        - LectioTests
+        - LectioUITests

@@ -6,7 +6,7 @@ license = "MIT"
 description = "Lectio: lecture notes timestamped to the audio (Phases 1-3: Capture, Material, Text and audio)"
 
 [workspace]
-members = ["crates/lectio-core", "crates/lectio-speech", "crates/lectio-llm", "crates/lectio-export", "crates/lectio-worker"]
+members = ["crates/lectio-core", "crates/lectio-speech", "crates/lectio-llm", "crates/lectio-export", "crates/lectio-ffi", "crates/lectio-worker"]
 
 # ---- every target: Windows, macOS, Linux and the web (ADR-010) ----
 [dependencies]

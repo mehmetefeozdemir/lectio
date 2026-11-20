@@ -182,3 +182,93 @@ jobs:
             shots/phase4b-web-*.png
             target/web-downloads/*
           if-no-files-found: ignore
+
+  # Phase 5a (ADR-029): the UniFFI surface must also produce Kotlin, so the
+  # Android app (5b) can start from bindings that are known to generate.
+  kotlin-bindings:
+    name: Kotlin bindings (check for Android)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      - name: Build lectio-ffi as a shared library
+        run: cargo rustc -p lectio-ffi --lib --crate-type cdylib --locked
+
+      - name: Generate the Kotlin bindings
+        run: |
+          cargo run -p lectio-ffi --bin uniffi-bindgen --locked -- \
+            generate --library target/debug/liblectio_ffi.so --language kotlin --no-format --out-dir target/kotlin
+          file=$(find target/kotlin -name '*.kt' | head -n 1)
+          test -s "$file"
+          grep -q "class LectioLibrary" "$file"
+          echo "Generated $file ($(wc -l < "$file") lines)"
+
+      - name: Upload the Kotlin bindings
+        uses: actions/upload-artifact@v4
+        with:
+          name: kotlin-bindings
+          path: target/kotlin
+          if-no-files-found: error
+
+  # Phase 5a (ADR-029, ADR-030): the iOS app. Builds the XCFramework (device
+  # arm64, Simulator arm64 + x86_64) and the Swift bindings, generates the
+  # Xcode project, runs the XCTests and the UI test on a Simulator, and keeps
+  # the UI test's screenshots.
+  ios:
+    name: iOS (Simulator)
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      - name: Build the XCFramework, bindings and Xcode project
+        run: tools/mobile/build-ios.sh
+
+      - name: Pick an iPhone Simulator
+        id: simulator
+        run: |
+          udid=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          phones = [d for runtime, list_ in devices.items() if "iOS" in runtime for d in list_ if d["name"].startswith("iPhone")]
+          print(phones[-1]["udid"])')
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+
+      - name: Unit tests and the UI test
+        working-directory: app/mobile/ios
+        run: |
+          xcodebuild test -project Lectio.xcodeproj -scheme Lectio \
+            -destination "id=${{ steps.simulator.outputs.udid }}" \
+            -derivedDataPath build/DerivedData -resultBundlePath build/Tests.xcresult
+
+      - name: Export the Simulator screenshots
+        if: always()
+        working-directory: app/mobile/ios
+        run: |
+          mkdir -p build/screenshots
+          if [ -d build/Tests.xcresult ]; then
+            xcrun xcresulttool export attachments --path build/Tests.xcresult --output-path build/screenshots
+          fi
+          ls -la build/screenshots
+
+      - name: Upload the Simulator screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator-screenshots
+          path: mobile/ios/build/screenshots
+          if-no-files-found: ignore

@@ -661,3 +661,97 @@
   (Apple Developer ID / notarisation; a Windows code-signing certificate); otherwise the artifacts are unsigned and the
   install guide says how to open them.
 - **Consequences:** the new CI steps start as advisory (they don't fail the build) until they have been green a few times.
+
+## ADR-029: Mobile: native UI shells over the shared Rust core, through UniFFI
+- **Date:** 2026-11-20
+- **Status:** accepted; written before the code and built as planned. One rule moved across that I had first left to
+  Swift: a note's moment is when typing *started* (`NoteDraft` in the core), so it is exposed too.
+- **Context:** Phase 5 brings Lectio to iOS/iPadOS now and Android next. The desktop and web apps share one egui UI, but on
+  phones users expect the platform's own controls, navigation, text sizes, VoiceOver/TalkBack behaviour and system sheets.
+  The notes must stay in exactly the desktop's format, so a later sync (5c) can move files between devices unchanged.
+- **Options considered:**
+
+  | option | native look and accessibility | shared logic | notes |
+  |---|---|---|---|
+  | egui on iOS/Android | no (custom-drawn controls; no Dynamic Type, weak screen-reader support on mobile) | everything | one UI, but it would feel foreign and fail the accessibility goals |
+  | Flutter / React Native over a Rust library | partly | the Rust core | a third UI language, and still a bridge to Rust |
+  | Kotlin Multiplatform for the logic | yes | rewrite the core in Kotlin | two cores to keep in step |
+  | **SwiftUI and Jetpack Compose over the Rust core via UniFFI (chosen)** | yes | data model, storage, audio maths, export, Whisper, study AI | UniFFI generates the Swift and Kotlin bindings from one Rust interface |
+- **Decision:** a new crate `lectio-ffi` is the only door into Rust for mobile. It exposes objects and records (no egui,
+  no platform code), and `uniffi-bindgen` generates Swift now and Kotlin in 5b from the same library.
+  - **Stays in Rust:** the data model and every rule on it; the storage format (`library.json`, `recordings/*.wav`,
+    `blobs/`, `models/`) and its migrations; recording maths (downmix, resample to 16 kHz, 16-bit WAV); seek and
+    time-stretch for playback; search; collections; ink; formulas (parsing, layout and drawing); the paper view's blocks
+    and every export (Markdown, PDF, DOCX) including the pictures in them; Whisper; the study model (outline, quiz,
+    flashcards, SM-2); the dictionary; checksums of downloaded models.
+  - **Native (Swift now, Kotlin later):** the UI and navigation; the audio session (permissions, interruptions, route
+    changes, background audio) and moving samples between the microphone or speaker and Rust; PDF page display (PDFKit);
+    camera and photo picking; the share sheet; file downloads (URLSession, which can continue in the background); app
+    lifecycle.
+  - **The boundary carries data, not UI:** Swift sends samples, text, ids and file bytes; Rust returns plain records
+    (sessions, notes, segments) and file bytes. All Rust calls that can take long (transcription, model loading,
+    export) are made from background tasks.
+- **Consequences:** the iOS app reads and writes the same files as the desktop app (a test round-trips a library through
+  both code paths). Bugs in shared logic are fixed once. The cost is a generated layer (bindings) and a native build of
+  the Rust code for each device architecture (an XCFramework on iOS).
+
+## ADR-030: The Xcode project is generated from a text file (XcodeGen)
+- **Date:** 2026-11-20
+- **Status:** accepted
+- **Context:** an `.xcodeproj` is a large machine-written file that merges badly and hides settings in a GUI. The project
+  has to build the same way on a laptop and in CI.
+- **Options considered:** a committed `.xcodeproj` (hard to review); Tuist (a Swift DSL and its own toolchain); Swift
+  Package Manager alone (can't build an iOS app bundle); **XcodeGen (chosen)**: a short `project.yml` describing targets,
+  settings and files, from which the project is generated, and a single pinned binary.
+- **Decision:** `mobile/ios/project.yml` is the source of truth; the generated `Lectio.xcodeproj` is not committed.
+  `tools/mobile/build-ios.sh` downloads a pinned XcodeGen release into `target/tools/` (nothing is installed on the
+  system), builds the Rust XCFramework and Swift bindings, then generates the project. Signing settings in the file are
+  empty (automatic signing with the developer's own team, chosen in Xcode), so no team id or certificate is in the
+  repository.
+- **Details found while building:** the script uses an `xcodegen` already on the `PATH` if there is one, otherwise the
+  pinned 2.48.0 zip, checked against its SHA-256 before it is unpacked. The app targets iOS 16, but the two test bundles
+  target iOS 17, because the XCTest libraries in current Xcode are built for 17 (otherwise the linker warns on every
+  build). The app icon is copied from `assets/icon/lectio-icon-ios.png` at generation time, so the desktop and phone
+  icons come from the same drawing code.
+
+## ADR-031: iOS audio, transcription and model files
+- **Date:** 2026-11-20
+- **Status:** accepted
+- **Recording:** `AVAudioEngine` taps the input (whatever the route: built-in mic, AirPods, a USB mic) and hands each
+  buffer of samples to a Rust `AudioRecorder` object, which downmixes, resamples to 16 kHz and writes the same 16-bit WAV as the
+  desktop (`lectio_core::resample::SpeechConverter`). The audio session is `.playAndRecord` with background audio, so a
+  lecture keeps recording with the screen locked. Interruptions (a call, Siri) pause the recorder and the clock, and it
+  resumes when the system says so; route changes (AirPods connected or removed) restart the input tap on the new route.
+- **Playback:** a Rust `AudioPlayer` object reads the WAV and applies the desktop's time-stretch (WSOLA) at the chosen speed;
+  Swift schedules the returned blocks on an `AVAudioPlayerNode`. Seeking and the playhead use the core's seek maths.
+- **Transcription:** Whisper on candle in Rust, using Apple's Accelerate framework on iOS as on macOS. candle's Metal
+  backend was considered, but its kernels for Whisper's operations are less complete than the CPU path and would need
+  their own testing on devices; Accelerate is the dependable first step.
+- **Model files:** downloaded by `URLSession` from the same pinned URLs the desktop uses (listed by Rust), then checked by
+  Rust (size and SHA-256) before loading. Downloading in Swift keeps an HTTP/TLS stack out of the Rust build, and leaves
+  room to move to a background `URLSession` later; for now a download runs while the app is open, into a `.partial`
+  file that is only moved into place once it checks out.
+
+## ADR-032: iOS state: view models as `ObservableObject`s, with test seams for audio
+- **Date:** 2026-11-20
+- **Status:** accepted
+- **Context:** the app must run on iOS 16, and its view models must be testable without a microphone, a speaker or a
+  person tapping buttons; CI Simulators have no audio hardware at all.
+- **Options considered:**
+
+  | option | iOS 16 | testable | notes |
+  |---|---|---|---|
+  | Swift's `@Observable` macro (Observation) | no, iOS 17+ | yes | finer-grained updates, but would drop iOS 16 |
+  | a single store with reducers (TCA-style library) | yes | yes | a large dependency and a new pattern to learn for a small app |
+  | logic in the views (`@State` only) | yes | only through UI tests | slow, brittle tests |
+  | **`@MainActor` `ObservableObject` view models over `LectioLibrary` (chosen)** | yes | XCTest calls them directly | the rules stay in Rust; Swift models only hold screen state |
+- **Decision:** one view model per screen (`HomeModel`, `SessionModel`, `StudyModel`, `TranscriptionModel`) plus app-wide
+  `RecorderModel` and `PlayerModel` (a recording keeps going while the user moves between lectures). Each takes the
+  library in its initialiser, so tests open a library in a temporary folder. Audio goes through two small protocols:
+  `AudioSource` (microphone, or a 440 Hz test tone at 48 kHz stereo) and `AudioOutput` (`AVAudioPlayerNode`, or a silent
+  clock that takes blocks at real-time pace). The UI test picks the test versions with launch arguments
+  (`-LectioFreshStart`, `-LectioTestAudio`); a normal launch never uses them. After a change, models call
+  `AppModel.changed()`, which bumps a revision number other screens watch to reload.
+- **Consequences:** 26 XCTests cover the view models in under a second, including interruptions, route-change formats,
+  speed and the note-stamping rule; the UI test runs the real screens end to end on any Simulator. Moving to `@Observable`
+  later is a mechanical change once iOS 16 support is dropped.

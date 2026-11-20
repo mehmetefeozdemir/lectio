@@ -1,0 +1,29 @@
+[package]
+name = "lectio-ffi"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Lectio's mobile surface (ADR-029): the shared Rust core as UniFFI objects and records, for the SwiftUI app (and Kotlin in 5b)."
+
+# A plain Rust library for tests and the desktop workspace. The iOS build asks
+# for a static library and the Kotlin check for a dynamic one with
+# `cargo rustc --crate-type …` (tools/mobile/build-ios.sh), so normal builds
+# don't link the whole engine twice.
+[lib]
+name = "lectio_ffi"
+
+# `cargo run -p lectio-ffi --bin uniffi-bindgen -- generate …` writes the
+# Swift and Kotlin bindings from the compiled library.
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+# Nothing here for the browser build (the web app doesn't use it).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+uniffi = { version = "0.32", features = ["cli"] }
+lectio-core = { path = "../lectio-core" }
+lectio-speech = { path = "../lectio-speech" }
+lectio-llm = { path = "../lectio-llm" }
+lectio-export = { path = "../lectio-export" }
+hound = "3.5"
+sha2 = "0.11"
