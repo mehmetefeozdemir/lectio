@@ -551,3 +551,17 @@ Every bug, dead end and wrong turn while building Lectio, with the root cause, w
 - **Root cause:** On X11 (which Xvfb provides), winit loads the keyboard library `libxkbcommon-x11` with `dlopen` at runtime instead of linking it. The CI installed `libxkbcommon-dev`, which has the headers and the base library but not the X11 part, and the build doesn't notice because nothing links against it.
 - **Fix:** Added `libxkbcommon-x11-0` to the CI's Linux packages.
 - **Lesson:** Libraries opened with `dlopen` don't show up at link time, so only running the app finds them missing. An advisory step that fails still needs reading: a green run with a red annotation is not a clean run.
+
+## P-045: The Linux release build failed on Ubuntu 22.04: `cannot find function spa_meta_region_is_valid`
+- **Phase:** 4b (first release, tag v0.1.0)
+- **Symptom:** The release workflow's `linux` job failed while compiling `libspa 0.10.1`: missing functions (`spa_meta_region_is_valid`, `spa_meta_first`), a missing `flags` field on `spa_video_info_raw`, and `i64`/`u64` mismatches. CI on `ubuntu-latest` (24.04) built the same code fine.
+- **Root cause:** The release job ran on Ubuntu 22.04 so the AppImage would work on older systems. The screen-capture library (`xcap`) reaches PipeWire through `libspa`, whose bindings are generated from the system's headers. 22.04 ships PipeWire 0.3.48, which predates those functions and fields. Newer headers alone wouldn't help either: the AppImage leaves out `libpipewire` on purpose (it has to match the system's sound server), so on 22.04 it would load the old library at run time anyway.
+- **Fix:** The Linux release builds on Ubuntu 24.04, and the install guide now says glibc 2.39+ (Ubuntu 24.04+, Fedora 40+, Debian 13+).
+- **Lesson:** "Build on the oldest system you support" also fixes the oldest version of every system library you bind to, not only glibc. The CI matrix and the release job ran on different Ubuntu versions, so CI being green didn't cover the release. Release builds should be tried before tagging (`workflow_dispatch`) rather than discovered on the tag.
+
+## P-046: The macOS release failed at the last step: `hdiutil: create failed - No space left on device`
+- **Phase:** 4b (first release, tag v0.1.0)
+- **Symptom:** On the release workflow's `macos` job, both architectures built, `lipo` joined them, the app was signed and verified, and then the `.dmg` step failed with "No space left on device".
+- **Root cause:** The disk wasn't full. `hdiutil create -srcfolder` estimates the image size from the folder on its own, and on GitHub's macOS runners that estimate is sometimes too small for the contents. This is a known, intermittent problem. The app is about 3× larger than a single-architecture build because it holds both Apple Silicon and Intel code, which makes a tight estimate more likely to miss.
+- **Fix:** `macos.sh` measures the staged folder with `du`, passes `-size` (folder plus 64 MB) and `-fs HFS+` itself, and retries up to three times. A retry also covers hdiutil's other intermittent error, "Resource busy".
+- **Lesson:** A packaging tool on CI can fail for reasons unrelated to the code. Read the last line before the error rather than assuming the build broke. Once the cause is known, make the step state its inputs explicitly instead of relying on the tool's guesses.

@@ -78,7 +78,18 @@ STAGE="$OUT/dmg"
 rm -rf "$STAGE" "$DMG" && mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
-hdiutil create -volname "Lectio $VERSION" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+# hdiutil's own size estimate is sometimes too small on CI runners ("No space
+# left on device"), so give it the folder's size plus room, and retry: it also
+# fails now and then with "Resource busy".
+SIZE_MB=$(( $(du -sm "$STAGE" | cut -f1) + 64 ))
+for attempt in 1 2 3; do
+  if hdiutil create -volname "Lectio $VERSION" -srcfolder "$STAGE" -size "${SIZE_MB}m" \
+      -fs HFS+ -ov -format UDZO "$DMG" >/dev/null; then
+    break
+  fi
+  [ "$attempt" = 3 ] && { echo "hdiutil failed 3 times" >&2; exit 1; }
+  echo "hdiutil failed (attempt $attempt), retrying"; sleep 5
+done
 rm -rf "$STAGE"
 
 if [ -n "${MACOS_SIGNING_IDENTITY:-}" ] && [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ] && [ -n "${APPLE_APP_PASSWORD:-}" ]; then

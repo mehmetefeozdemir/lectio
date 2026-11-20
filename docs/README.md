@@ -10,7 +10,7 @@ Every release on the project's GitHub **Releases** page has these files (`<v>` i
 |---|---|---|
 | macOS 11 or newer (Apple Silicon and Intel) | `Lectio-<v>-macos-universal.dmg` | one app for both kinds of Mac |
 | Windows 10 or 11 (64-bit) | `Lectio-<v>-windows-x64.msi` (installer) or `…-windows-x64.zip` (no install) | |
-| Linux (x86-64, glibc 2.35 or newer: Ubuntu 22.04+, Fedora 36+, Debian 12+) | `Lectio-<v>-linux-x86_64.AppImage` | one file, no install |
+| Linux (x86-64, glibc 2.39 or newer: Ubuntu 24.04+, Fedora 40+, Debian 13+) | `Lectio-<v>-linux-x86_64.AppImage` | one file, no install |
 | Web | `Lectio-<v>-web.zip` | files to put on your own web server |
 | — | `SHA256SUMS.txt` | checksums of all of the above |
 

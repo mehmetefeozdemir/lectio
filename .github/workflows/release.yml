@@ -121,7 +121,8 @@ jobs:
   linux:
     needs: version
     # The oldest supported Ubuntu: an AppImage runs where glibc is the same or newer.
-    runs-on: ubuntu-22.04
+    # Not 22.04: its PipeWire (0.3.48) is too old for the screen-capture bindings.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
