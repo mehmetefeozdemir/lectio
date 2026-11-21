@@ -25,6 +25,22 @@ mobile/android/.idea/
 *.iml
 *.jks
 *.keystore
+# The upload key's settings (ADR-038): local only, never committed
+mobile/android/keystore.properties
+
+# Stores (ADR-039..041): screenshots are made by tools/store/screenshots.sh;
+# fastlane's own outputs, keys and the Ruby bundle stay local
+mobile/ios/fastlane/screenshots/
+mobile/android/fastlane/metadata/android/*/images/phoneScreenshots/
+mobile/android/fastlane/metadata/android/*/images/sevenInchScreenshots/
+mobile/android/fastlane/metadata/android/*/images/tenInchScreenshots/
+mobile/*/fastlane/report.xml
+mobile/*/fastlane/Preview.html
+mobile/*/fastlane/README.md
+mobile/*/fastlane/test_output/
+mobile/.bundle/
+*.p8
+*.mobileprovision
 
 # IDE settings (Android Studio, IntelliJ)
 .idea/

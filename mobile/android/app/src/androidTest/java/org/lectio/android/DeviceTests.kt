@@ -182,9 +182,9 @@ class RustOnDeviceTest {
  * Skipped unless the models and a clip were pushed to the device:
  *
  *     adb push whisper-tiny whisper-base speech.wav /data/local/tmp/bench/
- *     adb shell run-as org.lectio.android cp -r /data/local/tmp/bench files/
+ *     adb shell run-as io.github.mehmetefeozdemir.lectio cp -r /data/local/tmp/bench files/
  *     adb shell am instrument -w -e class org.lectio.android.WhisperBenchmarkTest -e bench true \
- *         org.lectio.android.test/androidx.test.runner.AndroidJUnitRunner
+ *         io.github.mehmetefeozdemir.lectio.test/androidx.test.runner.AndroidJUnitRunner
  *
  * An emulator runs on the computer's processor; a real phone is needed for
  * real numbers (the Transcript tab shows them after each run).

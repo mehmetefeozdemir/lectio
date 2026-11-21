@@ -6,10 +6,14 @@
 #
 # No signing team is set here. For a real device, pick your own (free)
 # personal team in Xcode under Signing & Capabilities; see docs/README.md.
+# For the App Store, tools/mobile/archive-ios.sh passes the team in.
+#
+# The version and build number come from mobile/version.properties (ADR-036):
+# build-ios.sh exports them as LECTIO_VERSION and LECTIO_BUILD.
 name: Lectio
 
 options:
-  bundleIdPrefix: org.lectio
+  bundleIdPrefix: io.github.mehmetefeozdemir
   deploymentTarget:
     iOS: "16.0"
   createIntermediateGroups: true
@@ -17,8 +21,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.2.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "${LECTIO_VERSION}"
+    CURRENT_PROJECT_VERSION: "${LECTIO_BUILD}"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: ""
     ENABLE_USER_SCRIPT_SANDBOXING: YES
@@ -41,6 +45,9 @@ targets:
       path: Lectio/Info.plist
       properties:
         CFBundleDisplayName: Lectio
+        # XcodeGen otherwise writes "1.0" and "1" here (P-066).
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         UIBackgroundModes: [audio]
         UIApplicationSupportsIndirectInputEvents: true
@@ -56,9 +63,11 @@ targets:
         NSMicrophoneUsageDescription: Lectio records the lecture so each note can play back the moment it was written.
         NSCameraUsageDescription: Lectio takes photos of the board or a handout and adds them to your notes.
         NSPhotoLibraryUsageDescription: Lectio adds photos you choose to your notes.
+        # Only HTTPS (model downloads); no other encryption (ADR-037).
+        ITSAppUsesNonExemptEncryption: false
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: org.lectio.Lectio
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.mehmetefeozdemir.lectio
         PRODUCT_NAME: Lectio
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -75,7 +84,7 @@ targets:
       - target: Lectio
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: org.lectio.LectioTests
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.mehmetefeozdemir.lectio.tests
         GENERATE_INFOPLIST_FILE: YES
         # Current XCTest needs iOS 17; the app itself still runs on 16.
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
@@ -88,7 +97,7 @@ targets:
       - target: Lectio
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: org.lectio.LectioUITests
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.mehmetefeozdemir.lectio.uitests
         GENERATE_INFOPLIST_FILE: YES
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
         TEST_TARGET_NAME: Lectio
@@ -100,6 +109,12 @@ schemes:
         Lectio: all
     run:
       config: Debug
+    # The App Store build (tools/mobile/archive-ios.sh): Release, where the
+    # test-only launch options are compiled out (ADR-037).
+    archive:
+      config: Release
+    profile:
+      config: Release
     test:
       config: Debug
       gatherCoverageData: true

@@ -1,0 +1,46 @@
+# Google Play lanes (ADR-041). From app/mobile/android:  bundle exec fastlane <lane>
+#
+# Secrets come only from the environment:
+#   PLAY_SERVICE_ACCOUNT_JSON_PATH   the Play Console service account's JSON key file
+#   LECTIO_KEYSTORE_FILE, LECTIO_KEYSTORE_PASSWORD, LECTIO_KEY_ALIAS, LECTIO_KEY_PASSWORD
+#                                    the upload key (or mobile/android/keystore.properties)
+#   PLAY_RELEASE_STATUS              "draft" (default; required until the app's first
+#                                    release is reviewed) or "completed"
+default_platform(:android)
+
+APP_DIR = File.expand_path("../../..", __dir__)
+PACKAGE = "io.github.mehmetefeozdemir.lectio"
+
+def version_file(key)
+  File.read(File.join(APP_DIR, "mobile/version.properties"))[/^#{key}=(.+)$/, 1]
+end
+
+platform :android do
+  desc "Build the signed App Bundle (tools/package/android-bundle.sh) and upload it to internal testing"
+  lane :internal do
+    sh(File.join(APP_DIR, "tools/package/android-bundle.sh"))
+    upload_to_play_store(
+      package_name: PACKAGE,
+      json_key: ENV.fetch("PLAY_SERVICE_ACCOUNT_JSON_PATH"),
+      track: "internal",
+      release_status: ENV.fetch("PLAY_RELEASE_STATUS", "draft"),
+      aab: File.join(APP_DIR, "dist-release/Lectio-#{version_file('version')}-#{version_file('build')}.aab"),
+      metadata_path: File.join(__dir__, "metadata/android"),
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+    )
+  end
+
+  desc "Upload the store listing: text, icon, feature graphic, screenshots (no build)"
+  lane :metadata do
+    upload_to_play_store(
+      package_name: PACKAGE,
+      json_key: ENV.fetch("PLAY_SERVICE_ACCOUNT_JSON_PATH"),
+      metadata_path: File.join(__dir__, "metadata/android"),
+      skip_upload_aab: true,
+      skip_upload_apk: true,
+      skip_upload_changelogs: true,
+    )
+  end
+end

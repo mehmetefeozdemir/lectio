@@ -817,7 +817,7 @@
 
 ## ADR-035: Releasing the Android app as an APK
 - **Date:** 2026-11-20
-- **Status:** accepted
+- **Status:** accepted; the version scheme and "R8 is off" are replaced by ADR-036 and ADR-038
 - **Context:** releases (ADR-028) attach files for every platform; there is no Play Store listing yet, so Android users
   install the APK by hand.
 - **Options considered:** an Android App Bundle (Play Store only); an unsigned APK (Android refuses to install it); a
@@ -831,3 +831,129 @@
 - **Consequences:** every release has an installable Android file. A debug-signed APK can't update an install signed by
   another machine (Android checks the signature), so without the release key an update means uninstalling first; the
   README says so.
+
+## ADR-036: Store identity and one version file
+- **Date:** 2026-11-21
+- **Status:** accepted
+- **Context:** to publish on the App Store and Google Play, the app needs ids that I control and can never change
+  later, a store name, and build numbers that always go up. The App Store already has an app called exactly
+  "Lectio". Until now the ids were `org.lectio.Lectio` (iOS) and `org.lectio.android` (Android); I don't own
+  `lectio.org`, and reverse-DNS ids are expected to come from a domain you control.
+- **Options considered:**
+  | question | options | chosen |
+  |---|---|---|
+  | id | a domain I'd have to buy; `org.lectio.*`; **my GitHub Pages domain** | **`io.github.mehmetefeozdemir.lectio`** on both stores: I control `mehmetefeozdemir.github.io`, where the web app, privacy policy and support page live |
+  | Kotlin package | rename `org.lectio.android` everywhere; **keep it** | **keep it**: Android separates the `namespace` (where `R` and the classes live) from the `applicationId` (the store identity), so only the id changes, with no churn in 40 files |
+  | store name | "Lectio" (taken); a different app name; **a descriptive suffix** | **"Lectio: Lecture Notes"** in both stores; the name under the icon stays "Lectio" (`CFBundleDisplayName`, the Android label) |
+  | version source | the git tag; `gradle.properties` plus `project.yml`; **one file both read** | **`mobile/version.properties`** (`version=1.0.0`, `build=1`): Gradle reads it for `versionName`/`versionCode`, `build-ios.sh` exports it to XcodeGen for `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` |
+  | build number | computed from the version (ADR-035's major·10000+…); a timestamp; **a counter** | **a counter I raise by one for every upload**, the same on both stores; a computed number can't express a second upload of the same version |
+- **Decision:** the bundle ids are `io.github.mehmetefeozdemir.lectio` (app), `.tests` and `.uitests`; the Android
+  `applicationId` is the same and the namespace stays `org.lectio.android`. The release workflow checks that a pushed
+  tag matches `version.properties`, and `tools/package/android.sh` only uses its argument for the file name.
+- **Consequences:** the ids are permanent once uploaded. Installs of the earlier sideloaded APK (`org.lectio.android`)
+  are a different app to Android, so they don't update to the store version; their notes move with Export/Import.
+
+## ADR-037: iOS submission: Release archive, privacy manifest, review-safe launch options
+- **Date:** 2026-11-21
+- **Status:** accepted
+- **Context:** an App Store build must archive in Release with automatic signing and no team id in the repository,
+  declare its privacy practices and "required reason" APIs, explain background audio, and contain nothing test-only.
+- **Options considered:** signing: a team id in `project.yml`; manual profiles; **automatic signing with the team
+  passed in**. Privacy manifest: list every API category that might be used; **list only what the binary really
+  calls**. Test hooks: keep the launch flags and ignore them in Release; **compile them out of Release**.
+- **Decision:**
+  - The Lectio scheme archives and profiles in Release. `tools/mobile/archive-ios.sh [export|upload]` runs
+    `xcodebuild archive` with `DEVELOPMENT_TEAM=$LECTIO_TEAM_ID` and `-allowProvisioningUpdates`, then
+    `-exportArchive` with `mobile/ios/ExportOptions.plist` (`app-store-connect`, automatic signing), after adding the
+    team id to a temporary copy. With an App Store Connect API key in the environment it signs in with that (CI).
+  - `ITSAppUsesNonExemptEncryption = NO`: the app only uses HTTPS through the system, which is exempt.
+  - `PrivacyInfo.xcprivacy`: no tracking, no tracking domains, no collected data, and one required-reason API:
+    **File timestamp, reason C617.1** (the app reads modification dates of its own files). I checked the Release
+    binary's imported symbols with `nm -u`: `stat`/`fstat` are there; `statfs`/`fstatvfs` (disk space) and
+    boot-time calls are not, although the Rust crates contain them (P-067). UserDefaults is only read in Debug
+    builds (below), so it isn't declared.
+  - `UIBackgroundModes: audio` stays, for recording with the screen locked; playback pauses when the app goes to the
+    background, so the mode is used only while recording. The review notes say so.
+  - The test launch options (`-LectioFreshStart`, `-LectioTestAudio`, `-LectioSampleLibrary`) and the test data
+    folder are inside `#if DEBUG`; the Release binary has none of these strings (checked with `strings`).
+- **Consequences:** the archive is reproducible from the repository plus a team id. The manifest must be revisited
+  when a dependency adds a required-reason API; the `nm -u` check is the way to see it.
+
+## ADR-038: Android release: a signed App Bundle, shrunk with R8
+- **Date:** 2026-11-21
+- **Status:** accepted
+- **Context:** Google Play requires an Android App Bundle (`.aab`) signed with an upload key, a current target SDK,
+  16 KB page support for native code, and a declaration for each foreground-service type.
+- **Options considered:** signing: a committed keystore (never); **environment variables or a gitignored
+  `keystore.properties`**. Shrinking: keep R8 off (ADR-035); **R8 on with keep rules, if the tests pass on the
+  shrunk build**.
+- **Decision:**
+  - `tools/package/android-bundle.sh` reads the version file, needs a key (environment or
+    `mobile/android/keystore.properties`), builds the Rust libraries, checks that the 64-bit libraries' LOAD segments
+    are 16 KB aligned (`llvm-readelf`), runs `bundleRelease`, and refuses a bundle signed with a debug key
+    (`keytool -printcert -jarfile`). Output: `dist-release/Lectio-<version>-<build>.aab`.
+  - R8 and resource shrinking are on for release. `proguard-rules.pro` keeps JNA (`com.sun.jna.**`, which finds
+    classes and fields by name) and the generated bindings (`uniffi.**`). To prove the rules, the instrumented tests
+    can run against the shrunk release build: `./gradlew -Plectio.testRelease=true connectedReleaseAndroidTest`
+    switches `testBuildType` to release and adds test-only keep rules (P-068 to P-070). All of them pass there, as
+    they do in debug.
+  - targetSdk 37 (the newest), minSdk 26. The recording service has `foregroundServiceType="microphone"`; the Play
+    declaration text is in `mobile/store-answers.md`. Native libraries stay uncompressed and page-aligned
+    (`useLegacyPackaging = false`, NDK r30).
+- **Consequences:** the bundle is about 30 MB (the APK was 73 MB with three ABIs; Play delivers one ABI per device).
+  A missing keep rule would show up as a crash only in release, which is why the release test run exists.
+
+## ADR-039: Store screenshots from UI tests, with a shared sample lecture
+- **Date:** 2026-11-21
+- **Status:** accepted
+- **Context:** each store wants screenshots at fixed sizes (App Store: 6.9" iPhone and 13" iPad; Play: phone, 7" and
+  10" tablets, plus a 1024×500 feature graphic and a 512×512 icon). Taken by hand they go stale with every UI change.
+- **Options considered:** by hand in the simulators; a design tool with frames; **the UI tests on a sample library**.
+- **Decision:**
+  - The sample lecture moved into `lectio_core::sample` (courses, "Graph traversal" with headed and labelled notes,
+    two formulas, a two-page slide deck with a highlight and a circled diagram on page 2, a transcript, three
+    Definition notes for a quiz). The desktop demo and the phones use the same data; `lectio-ffi` adds
+    `add_sample_library()`, which also writes a silent 50-minute WAV so the lecture can play.
+  - `StoreScreenshotUITests` (iOS) and `StoreScreenshotTest` (Android) skip unless asked, then open the sample: home,
+    notes (after playing from the 17:05 note and pausing), slides, transcript, quiz.
+  - `tools/store/screenshots.sh` sets light mode and a clean status bar (iOS `simctl status_bar override`; Android
+    demo mode), runs them on the right devices (Android: one emulator resized with `wm size`/`wm density` for
+    each form factor), and puts the files where fastlane expects them. The feature graphic and the icon are drawn
+    by a Rust test from the same notebook drawing as the app icon.
+- **Consequences:** screenshots are reproducible and always show the current UI. Making them showed two bugs a manual
+  pass had missed: every ink stroke on the phones was as wide as the page (P-073) and the 7" tablet layout cut off
+  the tabs (P-074).
+
+## ADR-040: Privacy policy, support page and the store answers
+- **Date:** 2026-11-21
+- **Status:** accepted
+- **Context:** both stores need a public privacy policy URL and a support URL, and ask detailed privacy questions.
+- **Options considered:** a hosted policy generator (adds trackers and boilerplate); a page in the repository's
+  README; **two static pages served with the web app**.
+- **Decision:** `web/privacy.html` and `web/support.html`, plain HTML with no scripts, fonts or external resources,
+  copied into the web build by trunk, so GitHub Pages serves them at `/lectio/privacy.html` and
+  `/lectio/support.html`. They say: no accounts; the developer collects nothing; notes stay on the device; models are
+  downloaded from Hugging Face; an AI provider (Ollama or OpenAI-compatible) is contacted only if the user sets one
+  up, and then the text sent goes to that provider; how to delete data; a contact email. Every store answer, with its
+  reason, is in `mobile/store-answers.md`: "Data Not Collected" (App Store) and "no data collected or shared" (Play),
+  because nothing is sent to me and the model downloads and user-configured providers don't count as collection by
+  the developer.
+- **Consequences:** if the app ever sends data to me (crash reports, analytics, sync), the pages and the answers must
+  change before that release.
+
+## ADR-041: Store listings as files, uploads with fastlane
+- **Date:** 2026-11-21
+- **Status:** accepted
+- **Context:** store text and settings typed into web forms aren't reviewed or versioned, and uploads by hand are
+  slow to repeat.
+- **Options considered:** only the web consoles; the stores' APIs with my own scripts; **fastlane** (`deliver` and
+  `supply`, which read a standard `metadata/` folder layout).
+- **Decision:** listings live in `mobile/ios/fastlane/metadata/` and `mobile/android/fastlane/metadata/android/en-US/`
+  (name, subtitle or short description, description, keywords, promotional text, release notes, URLs, categories,
+  review notes), with the age rating and App Privacy answers as JSON. Lanes: iOS `beta`, `metadata`, `privacy`;
+  Android `internal`, `metadata`. fastlane is pinned in `mobile/Gemfile`. The **Store upload** workflow
+  (`workflow_dispatch`) runs `beta` and `internal` on CI only if that store's secrets exist; keys are decoded into the
+  runner's temporary folder and deleted afterwards. All copy says what the app does, with no comparisons to other
+  products.
+- **Consequences:** changes to the listing are reviewed like code. The first Play upload and the app records in both
+  consoles still have to be made in the browser (the APIs can't create an app).

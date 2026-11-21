@@ -1,0 +1,145 @@
+# Store uploads (ADR-041), only when started by hand (Actions › Store upload ›
+# Run workflow) and only for a store whose secrets are set; otherwise that job
+# says what is missing and stops without failing. Builds come from the same
+# scripts as a local upload (tools/mobile/archive-ios.sh,
+# tools/package/android-bundle.sh) and fastlane uploads them.
+#
+# Secrets (Settings › Secrets and variables › Actions; docs/STORE.md says how
+# to make each one):
+#   App Store:   APPLE_TEAM_ID, APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID,
+#                APP_STORE_CONNECT_KEY_P8 (the .p8 file, base64)
+#   Google Play: PLAY_SERVICE_ACCOUNT_JSON (the JSON key, as is),
+#                ANDROID_UPLOAD_KEYSTORE_BASE64, ANDROID_UPLOAD_KEYSTORE_PASSWORD,
+#                ANDROID_UPLOAD_KEY_ALIAS, ANDROID_UPLOAD_KEY_PASSWORD
+#
+
+name: Store upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      store:
+        description: "Which store"
+        type: choice
+        options: [both, app-store, google-play]
+        default: both
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+defaults:
+  run:
+    working-directory: .
+jobs:
+  testflight:
+    name: TestFlight
+    if: inputs.store != 'google-play'
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      LECTIO_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+    steps:
+      - name: Are the App Store secrets set?
+        id: secrets
+        working-directory: .
+        run: |
+          if [ -n "$LECTIO_TEAM_ID" ] && [ -n "$APP_STORE_CONNECT_KEY_ID" ] && [ -n "$APP_STORE_CONNECT_ISSUER_ID" ] && [ -n "$KEY_P8" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::App Store secrets not set (see docs/STORE.md); skipping the TestFlight upload."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.secrets.outputs.ready == 'true'
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          workspaces: .
+      - name: Use the newest Xcode on the runner
+        if: steps.secrets.outputs.ready == 'true'
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)" && xcodebuild -version
+      - uses: ruby/setup-ruby@v1
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          ruby-version: "3.3"
+      - name: Install fastlane
+        if: steps.secrets.outputs.ready == 'true'
+        run: BUNDLE_GEMFILE=mobile/Gemfile bundle install
+      - name: Archive and upload to TestFlight
+        if: steps.secrets.outputs.ready == 'true'
+        working-directory: mobile/ios
+        run: |
+          export APP_STORE_CONNECT_KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
+          echo "$KEY_P8" | base64 --decode > "$APP_STORE_CONNECT_KEY_PATH"
+          BUNDLE_GEMFILE=../Gemfile bundle exec fastlane beta
+          rm -f "$APP_STORE_CONNECT_KEY_PATH"
+
+  play-internal:
+    name: Google Play internal testing
+    if: inputs.store != 'app-store'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PLAY_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+      KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+      LECTIO_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+      LECTIO_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+      LECTIO_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+    steps:
+      - name: Are the Google Play secrets set?
+        id: secrets
+        working-directory: .
+        run: |
+          if [ -n "$PLAY_JSON" ] && [ -n "$KEYSTORE_BASE64" ] && [ -n "$LECTIO_KEYSTORE_PASSWORD" ] && [ -n "$LECTIO_KEY_ALIAS" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Google Play secrets not set (see docs/STORE.md); skipping the internal-testing upload."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.secrets.outputs.ready == 'true'
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          workspaces: .
+      - uses: actions/setup-java@v4
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install the pinned NDK
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;30.0.16248370"
+      - uses: ruby/setup-ruby@v1
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          ruby-version: "3.3"
+      - name: Install fastlane
+        if: steps.secrets.outputs.ready == 'true'
+        run: BUNDLE_GEMFILE=mobile/Gemfile bundle install
+      - name: Build the signed bundle and upload it to internal testing
+        if: steps.secrets.outputs.ready == 'true'
+        working-directory: mobile/android
+        run: |
+          export LECTIO_KEYSTORE_FILE="$RUNNER_TEMP/upload.jks"
+          export PLAY_SERVICE_ACCOUNT_JSON_PATH="$RUNNER_TEMP/play.json"
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$LECTIO_KEYSTORE_FILE"
+          printf '%s' "$PLAY_JSON" > "$PLAY_SERVICE_ACCOUNT_JSON_PATH"
+          BUNDLE_GEMFILE=../Gemfile bundle exec fastlane internal
+          rm -f "$LECTIO_KEYSTORE_FILE" "$PLAY_SERVICE_ACCOUNT_JSON_PATH"

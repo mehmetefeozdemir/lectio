@@ -1,3 +1,5 @@
+import java.util.Properties
+
 // The Lectio Android app (ADR-033). Before building, run
 // tools/mobile/build-android.sh: it puts the Rust libraries in
 // src/main/jniLibs and the Kotlin bindings in src/generated/kotlin.
@@ -6,16 +8,26 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-/** "0.5.0" → 500; the version code only has to grow between releases. */
-fun versionCodeOf(name: String): Int =
-    name.split('.').map { it.takeWhile(Char::isDigit).toIntOrNull() ?: 0 }
-        .let { (it + listOf(0, 0, 0)).take(3) }
-        .let { (major, minor, patch) -> major * 10_000 + minor * 100 + patch }
 
-val lectioVersion = providers.gradleProperty("lectio.version").get()
+fun properties(text: String) = Properties().apply { load(text.reader()) }
 
-/** Release signing comes only from the environment (CI secrets); see ADR-035. */
-val releaseKeystore: String? = System.getenv("LECTIO_KEYSTORE_FILE")?.takeIf { it.isNotBlank() && file(it).exists() }
+/** Version and store build number: mobile/version.properties, shared with iOS (ADR-036). */
+val versions = properties(providers.fileContents(rootProject.layout.projectDirectory.file("../version.properties")).asText.get())
+val lectioVersion: String = versions.getProperty("version")
+val lectioBuild: Int = versions.getProperty("build").toInt()
+
+/**
+ * The upload / release key (ADR-035, ADR-038), never in the repository: from
+ * the environment (CI secrets), or from a gitignored keystore.properties next
+ * to settings.gradle.kts (storeFile, storePassword, keyAlias, keyPassword).
+ */
+val localSigning = rootProject.file("keystore.properties").takeIf { it.exists() }?.let { properties(it.readText()) }
+val releaseKeystore: String? = (System.getenv("LECTIO_KEYSTORE_FILE") ?: localSigning?.getProperty("storeFile"))
+    ?.takeIf { it.isNotBlank() && rootProject.file(it).exists() }
+fun signingValue(env: String, key: String): String? = System.getenv(env) ?: localSigning?.getProperty(key)
+
+/** -Plectio.testRelease=true: run the instrumented tests on the minified release build. */
+val testsOnRelease = providers.gradleProperty("lectio.testRelease").orNull == "true"
 
 android {
     namespace = "org.lectio.android"
@@ -25,11 +37,12 @@ android {
     compileSdkMinor = 1
 
     defaultConfig {
-        applicationId = "org.lectio.android"
+        // The store identity (ADR-036); the Kotlin package stays org.lectio.android.
+        applicationId = "io.github.mehmetefeozdemir.lectio"
         minSdk = 26
         targetSdk = 37
         versionName = lectioVersion
-        versionCode = versionCodeOf(lectioVersion)
+        versionCode = lectioBuild
         // Only the ABIs the Rust core is built for (JNA alone would add x86,
         // mips and armeabi, where Lectio couldn't load its library).
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
@@ -42,24 +55,34 @@ android {
     signingConfigs {
         if (releaseKeystore != null) {
             create("release") {
-                storeFile = file(releaseKeystore)
-                storePassword = System.getenv("LECTIO_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("LECTIO_KEY_ALIAS")
-                keyPassword = System.getenv("LECTIO_KEY_PASSWORD")
+                storeFile = rootProject.file(releaseKeystore)
+                storePassword = signingValue("LECTIO_KEYSTORE_PASSWORD", "storePassword")
+                keyAlias = signingValue("LECTIO_KEY_ALIAS", "keyAlias")
+                keyPassword = signingValue("LECTIO_KEY_PASSWORD", "keyPassword")
             }
         }
     }
 
     buildTypes {
         release {
-            // R8 is off: JNA and the generated bindings look classes up by
-            // name, and the gain is size only.
-            isMinifyEnabled = false
+            // R8 shrinks the release build (mostly unused icons and library
+            // code); proguard-rules.pro keeps what JNA and the UniFFI bindings
+            // find by name. The instrumented tests run against this build with
+            // -Plectio.testRelease=true (ADR-038).
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            testProguardFiles("proguard-test-rules.pro")
+            if (testsOnRelease) proguardFile("proguard-release-tests.pro")
             // Without the secrets the release APK is signed with the debug
             // key, so it can still be installed by hand.
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
+
+    // The instrumented tests normally run on the debug build; this runs them
+    // on the minified release build instead.
+    testBuildType = if (testsOnRelease) "release" else "debug"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -122,4 +145,7 @@ dependencies {
     androidTestImplementation(libs.kotlinx.coroutines.test)
     androidTestUtil(libs.androidx.test.services)
     debugImplementation(libs.compose.ui.test.manifest)
+    // The empty activity some Compose tests host their content in; in the
+    // release build only while testing it, never in the one that ships.
+    if (testsOnRelease) releaseImplementation(libs.compose.ui.test.manifest)
 }

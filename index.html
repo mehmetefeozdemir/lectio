@@ -9,6 +9,9 @@
   <!-- trunk: build the `lectio` binary to WebAssembly, and copy the recording worklet next to it. -->
   <link data-trunk rel="rust" data-bin="lectio" />
   <link data-trunk rel="copy-file" href="web/lectio-capture-worklet.js" />
+  <!-- trunk: the privacy policy and support pages the app stores link to (ADR-040). -->
+  <link data-trunk rel="copy-file" href="web/privacy.html" />
+  <link data-trunk rel="copy-file" href="web/support.html" />
   <!-- trunk: the speech worker (ADR-016), a second WebAssembly program run as a Web Worker. -->
   <link data-trunk rel="rust" href="crates/lectio-worker/Cargo.toml" data-bin="lectio-worker" data-type="worker" data-loader-shim />
 

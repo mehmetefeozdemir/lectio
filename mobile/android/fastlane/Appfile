@@ -1,0 +1,3 @@
+# The Google Play identity (ADR-036). The service account key is never stored
+# here; it comes from PLAY_SERVICE_ACCOUNT_JSON_PATH (see Fastfile).
+package_name("io.github.mehmetefeozdemir.lectio")

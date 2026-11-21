@@ -152,7 +152,11 @@ fn slides_ink_and_photos() {
     let line = vec![Point { x: 0.1, y: 0.5 }, Point { x: 0.9, y: 0.5 }];
     lib.add_ink_stroke(session.clone(), deck.clone(), 2, InkTool::Pen, InkColor::Red, line).unwrap();
     lib.add_ink_stroke(session.clone(), deck.clone(), 2, InkTool::Highlighter, InkColor::Yellow, vec![Point { x: 0.5, y: 0.9 }]).unwrap();
-    assert_eq!(lib.ink(session.clone(), deck.clone(), 2).unwrap().len(), 2);
+    let ink = lib.ink(session.clone(), deck.clone(), 2).unwrap();
+    assert_eq!(ink.len(), 2);
+    // Widths are fractions of the page width: thin lines, not the whole page (P-073).
+    let widths: Vec<f32> = ink.iter().map(|stroke| stroke.drawn_width).collect();
+    assert!(widths.iter().all(|w| *w > 0.0 && *w < 0.05), "drawn widths {widths:?}");
     assert_eq!(lib.erase_ink(session.clone(), deck.clone(), 2, Point { x: 0.5, y: 0.51 }).unwrap(), 1);
     lib.undo_ink(session.clone(), deck.clone(), 2).unwrap();
     assert!(lib.ink(session.clone(), deck, 2).unwrap().is_empty());
@@ -329,4 +333,26 @@ fn audio_as_little_endian_bytes_matches_audio_as_floats() {
 fn bytes_recorder_refuses_a_partial_sample(folder: &Folder) -> bool {
     let recorder = AudioRecorder::start(folder.0.join("odd.wav").to_string_lossy().into_owned()).unwrap();
     recorder.push_f32le(vec![0, 0, 0], 16_000, 1).is_err()
+}
+
+/// The store screenshots' sample: the desktop's sample lecture, with its
+/// slides and a (silent) recording on disk, and nothing added twice.
+#[test]
+fn the_sample_library_has_a_playable_lecture_with_slides_and_a_quiz() {
+    let folder = Folder::new("sample");
+    let lib = library(&folder);
+    let session = lib.add_sample_library().unwrap();
+    let detail = lib.session(session.clone()).unwrap();
+    assert_eq!(detail.info.title, "Graph traversal");
+    assert_eq!(detail.transcript.len(), 8);
+    assert!(std::path::Path::new(&detail.decks[0].pdf_path).exists());
+    assert_eq!(lib.ink(session.clone(), detail.decks[0].id.clone(), 2).unwrap().len(), 2);
+
+    let player = AudioPlayer::open(detail.recording_path.unwrap()).unwrap();
+    assert_eq!(player.duration_ms(), detail.info.duration_ms.unwrap());
+    assert_eq!(lib.offline_quiz(vec![session], 10).unwrap().len(), 3);
+    assert!(!lib.due_cards(u64::MAX).unwrap().is_empty(), "flashcards from the Definition notes");
+
+    let again = lib.add_sample_library().unwrap_err().to_string();
+    assert!(again.contains("empty"), "{again}");
 }

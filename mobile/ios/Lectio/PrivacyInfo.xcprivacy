@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Lectio's privacy manifest (ADR-037). No tracking, no data collected: notes,
+  recordings and models stay in the app's own folder.
+
+  Required-reason APIs, from the symbols of the Release executable (Swift and
+  the linked Rust library; checked with `nm -u`, P-069):
+  - File timestamps: stat / fstat (Rust's file reading and Foundation's file
+    sizes for the model downloads). Reason C617.1: only for files inside the
+    app's container.
+  - Disk space, system boot time, active keyboards: not used.
+  - UserDefaults: not used by the App Store build (the test-only launch
+    options that read it exist only in Debug builds).
+-->
+<plist version="1.0">
+<dict>
+    <key>NSPrivacyTracking</key>
+    <false/>
+    <key>NSPrivacyTrackingDomains</key>
+    <array/>
+    <key>NSPrivacyCollectedDataTypes</key>
+    <array/>
+    <key>NSPrivacyAccessedAPITypes</key>
+    <array>
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>C617.1</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

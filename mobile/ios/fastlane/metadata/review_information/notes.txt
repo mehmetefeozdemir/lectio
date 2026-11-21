@@ -1,0 +1,16 @@
+Thank you for reviewing Lectio.
+
+No account or sign-in is needed: every feature works right after installing, and all data stays on the device.
+
+How to try it:
+1. Tap "New course" and give it a name, then "+" (New lecture) and Create.
+2. Tap Record and allow the microphone. Type a note while it records and tap the send button; the note shows the time in the recording it belongs to. Tap Stop.
+3. Tap the note's time (for example 0:02) to play the recording from that moment. The speed menu (1×) changes playback speed.
+4. Export (share icon, top right) creates a PDF, Word or Markdown file and opens the share sheet.
+5. Optional: Transcript › Transcribe downloads a speech model once (about 150 MB for "tiny", from huggingface.co) and transcribes on the device.
+
+Background audio (UIBackgroundModes: audio): used only so a lecture keeps recording when the screen locks or the student switches apps during a class. Playback pauses when the app goes to the background. To check: start a recording, lock the screen for a few seconds, unlock, and the recording time has kept counting.
+
+Network: the app only connects to the internet to download the speech and study models from huggingface.co (HTTPS); it sends no user data anywhere. It uses no encryption other than HTTPS (ITSAppUsesNonExemptEncryption = NO).
+
+Privacy: no tracking, no analytics, no data collected (App Privacy: Data Not Collected). Privacy policy: https://mehmetefeozdemir.github.io/lectio/privacy.html

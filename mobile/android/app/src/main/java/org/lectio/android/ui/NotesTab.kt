@@ -99,7 +99,7 @@ fun NotesTab(session: SessionViewModel, graph: AppGraph, offsetNow: () -> ULong,
                     modifier = Modifier.align(Alignment.Center).padding(24.dp),
                 )
             }
-            LazyColumn(state = list, modifier = Modifier.fillMaxSize()) {
+            LazyColumn(state = list, modifier = Modifier.fillMaxSize().testTag("notes.list")) {
                 items(state.notes, key = { it.id }) { note ->
                     NoteRow(note, canPlay = state.recordingPath != null, playFrom = playFrom, session = session, onEdit = { editing = note })
                     HorizontalDivider()

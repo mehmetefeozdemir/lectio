@@ -681,7 +681,7 @@ Every bug, dead end and wrong turn while building Lectio, with the root cause, w
 - **Phase:** 5b
 - **Symptom:** after `adb push`ing the models to `/sdcard/Android/data/org.lectio.android/files/bench/`, `SpeechEngine.load` failed: `A model file is missing (…/config.json): Permission denied`.
 - **Root cause:** `adb shell mkdir -p` created the app's external folder before the app did, owned by the shell user, so the app couldn't read it.
-- **Fix:** the files are staged in `/data/local/tmp` and copied into the app's private folder with `run-as org.lectio.android cp -r …` (allowed for debug builds); the benchmark reads `files/bench`.
+- **Fix:** the files are staged in `/data/local/tmp` and copied into the app's private folder with `run-as org.lectio.android cp -r …` (allowed for debug builds); the benchmark reads `files/bench`. (Since 1.0.0 the application id is `io.github.mehmetefeozdemir.lectio`, ADR-036.)
 - **Lesson:** let an app create its own folders; copying in with `run-as` keeps the app as me.
 
 ## P-064: At 200 % text the lecture tabs read "Slide" and "Trans"
@@ -695,3 +695,102 @@ Every bug, dead end and wrong turn while building Lectio, with the root cause, w
 - **Symptom:** warnings on `ListItem(headlineContent = …)`, the value-based `Slider`, `Data.getStringArray`, and the Compose test rules `createEmptyComposeRule` / `createAndroidComposeRule`.
 - **Fix:** plain rows instead of `ListItem`; the `SliderState` slider (which also lets playback seek once when a drag ends, instead of on every movement); `getNullableStringArray`; the `v2` test rules. The build has no warnings.
 - **Lesson:** starting on the newest libraries means following their newest APIs; the warnings name the replacement.
+
+## P-066: The iOS archive said version 1.0, build 1, whatever the project said
+- **Phase:** 6 (store release)
+- **Symptom:** after setting `MARKETING_VERSION: 1.0.0` in `project.yml`, the archived app's Info.plist still had
+  `CFBundleShortVersionString = 1.0`.
+- **Root cause:** XcodeGen writes the Info.plist from the `info:` block and fills in its own defaults for the version
+  keys (`1.0` and `1`) instead of the build-setting variables.
+- **Fix:** the `info:` properties are now `CFBundleShortVersionString: $(MARKETING_VERSION)` and `CFBundleVersion:
+  $(CURRENT_PROJECT_VERSION)`, and both settings come from `mobile/version.properties` (ADR-036). I check the archived
+  plist with `PlistBuddy`: 1.0.0 / 1.
+- **Lesson:** read the shipped artifact, not the project file; generated projects have defaults of their own.
+
+## P-067: Which "required reason" APIs does the app really use?
+- **Phase:** 6
+- **Symptom:** the privacy manifest must list file timestamp, disk space, system boot time and UserDefaults APIs if
+  the app uses them. `nm` on the Rust static library showed `fstatfs`/`fstatvfs` (disk space) from the `rustix` crate.
+- **Root cause:** a static library contains every function of its dependencies; the linker keeps only what is called.
+- **Tried:** declaring disk space as well "to be safe" (rejected: a manifest that claims APIs the app doesn't call is
+  wrong in the other direction).
+- **Fix:** `nm -u` on the final Release binary: `stat`, `fstat` and file modification dates are used (declared as
+  FileTimestamp, C617.1); no `statfs`/`statvfs`, no `mach_absolute_time`/`sysctl` boot time. UserDefaults is read only
+  in Debug builds, so it isn't in the Release binary.
+- **Lesson:** check the linked binary; the library's symbol table overstates what ships.
+
+## P-068: R8 failed on the test APK: `Missing class javax.lang.model.element.Modifier`
+- **Phase:** 6
+- **Symptom:** with the instrumented tests pointed at the minified release build, `minifyReleaseAndroidTestWithR8`
+  stopped with "Missing class javax.lang.model.element.Modifier" (and the same for errorprone annotations).
+- **Root cause:** a test dependency refers to annotation-processor classes that don't exist on Android; the debug test
+  APK is never shrunk, so this had never come up.
+- **Fix:** `proguard-test-rules.pro` with `-dontwarn` for those two packages, applied only to the test APK
+  (`testProguardFiles`).
+- **Lesson:** a test APK is shrunk too once tests run against release, and needs its own rules.
+
+## P-069: The shrunk release tests crashed with `NoClassDefFoundError`
+- **Phase:** 6
+- **Symptom:** the tests started, then `java.lang.NoClassDefFoundError: androidx.tracing.Trace`, and after keeping
+  that, `kotlin.jvm.internal.Lambda`.
+- **Root cause:** the app and the test APK share library classes at run time. R8 removed classes from the app that only
+  the tests use (the app never calls them), so the test APK found them missing.
+- **Tried:** keeping each class as it came up (two rounds, then the next one); not a fix.
+- **Fix:** `proguard-release-tests.pro` keeps `kotlin.**`, `kotlinx.**`, `androidx.**` and the app's own package, and
+  is added only when `-Plectio.testRelease=true`. The shipped bundle doesn't use it, so it stays shrunk.
+- **Lesson:** to test a shrunk app, keep what the tests need from the app's side, but only for that build.
+
+## P-070: `Unable to resolve activity for Intent … androidx.activity.ComponentActivity`
+- **Phase:** 6
+- **Symptom:** in the release test run, every Compose test failed to start its host activity.
+- **Root cause:** Compose's empty test activity is declared by `ui-test-manifest`, which the project adds as
+  `debugImplementation`; the release app doesn't have it.
+- **Fix:** `releaseImplementation(libs.compose.ui.test.manifest)` only when `lectio.testRelease` is set, so the store
+  bundle never contains a test activity.
+- **Lesson:** debug-only dependencies are part of what tests rely on; switching build types exposes them.
+
+## P-071: The 16 KB check failed for `armeabi-v7a`
+- **Phase:** 6
+- **Symptom:** the new alignment check in `android-bundle.sh` reported `0x1000` (4 KB) segments for the 32-bit ARM
+  library.
+- **Root cause:** the 16 KB page requirement only applies to 64-bit devices; the NDK keeps 4 KB alignment for 32-bit
+  ABIs, which never run with 16 KB pages.
+- **Fix:** the script checks `arm64-v8a` and `x86_64` only, and says why.
+- **Lesson:** read what the requirement covers before writing the check.
+
+## P-072: The Android screenshot test couldn't find the note to play, then photographed a blank slide
+- **Phase:** 6
+- **Symptom:** "Expected exactly '1' node but could not find any node that satisfies: (ContentDescription = 'Play
+  from 17 minutes, 5 seconds')" on the phone size; on tablets it passed. After that, the slide screenshot showed an
+  empty area where the page should be.
+- **Root cause:** the notes are a lazy list, which only builds the rows on screen; on a phone the 17:05 note is below
+  the fold. The slide page is rendered and its ink loaded in a coroutine, after the tap that changes the page.
+- **Fix:** the list has a test tag and the test scrolls to the note (`performScrollToNode`); for the slide, the test
+  waits until the page's semantics say "2 ink strokes", which is set only after both have loaded.
+- **Lesson:** wait for the state the picture needs, described the way a screen reader would see it, not for time.
+
+## P-073: On the phones every ink stroke was as wide as the page
+- **Phase:** 6 (found by the store screenshots; present since 5a/5b)
+- **Symptom:** slide 2 of the sample lecture showed as a solid red rectangle on iOS and Android. The desktop and the
+  exported PDFs were correct.
+- **Root cause:** `lectio-ffi` filled `InkStrokeInfo.drawn_width` with `stroke_width(stroke, 1.0)`, the export
+  function that returns pixels for a page `page_width` pixels wide and never less than 1 pixel. With a page width of
+  1.0, every stroke came out 1.0, a whole page wide. The phones multiply this fraction by the page's on-screen width.
+- **Tried:** I first suspected the sample PDF; macOS PDFKit drew it correctly and its stream lengths and xref offsets
+  were right, and the red area had exactly the page's aspect ratio, which pointed at a stroke clipped to the page.
+- **Fix:** `relative_width()` in `lectio-export/src/ink.rs` (the fraction, highlighter widened), used by the FFI;
+  `stroke_width()` is now `relative_width × page_width`, at least one pixel. A test in `ffi_tests.rs` asserts the
+  widths are thin fractions; it failed with `[1.0, 1.0]` before the fix.
+- **Lesson:** a helper's clamp in one unit (pixels) is wrong in another (fractions); give each unit its own function.
+  The stroke being drawn (finger still down) uses the apps' own constant width, so the bug only appears once a stroke
+  is saved, and the tests counted saved strokes without looking at them. A fixed sample with ink, photographed on
+  every run, now shows it.
+
+## P-074: On a 7-inch tablet the lecture's tabs and ink tools were cut off
+- **Phase:** 6 (found by the store screenshots)
+- **Symptom:** at 600 dp wide, "Transcript" read "Transcrip", "Study" was off screen and the ink tools read "Highl" and
+  "Erase".
+- **Root cause:** two panes start at 600 dp, and the list pane was a fixed 360 dp, leaving the lecture 240 dp.
+- **Fix:** the list pane is at most 40 % of the width (`LectioRoot.kt`): 240 dp + 360 dp on a 7-inch tablet (the
+  lecture gets a phone's width), 320 + 480 dp on a 10-inch one, 360 dp from 900 dp up.
+- **Lesson:** test the narrowest width of every layout, not only a phone and a large tablet.

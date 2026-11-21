@@ -6,7 +6,7 @@ use lectio_core::ink::InkStroke;
 use lectio_core::material::{Attachment, AttachmentKind, BlobKey, MediaKind, SlideLink, check_file};
 use lectio_core::transcript::{Segment, Transcript};
 use lectio_core::{DeckId, ModelError, NoteId, Recording, SessionId};
-use lectio_export::ink::{alpha, stroke_width};
+use lectio_export::ink::{alpha, relative_width};
 
 use crate::library::LectioLibrary;
 use crate::{InkColor, InkStrokeInfo, InkTool, LectioError, Point, Result, SegmentInfo, id};
@@ -22,7 +22,9 @@ fn ink_info(stroke: &InkStroke) -> InkStrokeInfo {
     InkStrokeInfo {
         tool: stroke.tool.into(),
         color: stroke.color.into(),
-        drawn_width: stroke_width(stroke, 1.0),
+        // A fraction of the page width; not stroke_width(.., 1.0), whose
+        // one-pixel minimum made every stroke as wide as the page (P-073).
+        drawn_width: relative_width(stroke),
         opacity: f32::from(alpha(stroke)) / 255.0,
         points: stroke.points.iter().map(|[x, y]| Point { x: *x, y: *y }).collect(),
     }

@@ -21,6 +21,7 @@ mod export;
 mod library;
 mod material;
 mod models;
+mod sample;
 mod study;
 
 use lectio_core::LabelKind;

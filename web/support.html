@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Lectio – Support</title>
+  <style>
+    :root { --text: #1c1c22; --muted: #55556a; --accent: #4f46e5; --bg: #ffffff; --line: #e3e3ec; }
+    @media (prefers-color-scheme: dark) {
+      :root { --text: #f2f2f7; --muted: #b8b8c8; --accent: #a59cfa; --bg: #121218; --line: #2e2e3a; }
+    }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 1.0625rem/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    main { max-width: 44rem; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+    h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 .5rem; }
+    h2 { font-size: 1.3rem; margin: 2rem 0 .5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+    h3 { font-size: 1.05rem; margin: 1.25rem 0 .25rem; }
+    p, li { max-width: 40rem; }
+    a { color: var(--accent); }
+    .lead { color: var(--muted); }
+    a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Lectio support</h1>
+  <p class="lead">Lectio is a lecture note-taking app: record a class, write notes that are stamped with the moment in
+  the recording, add slides and photos, transcribe the audio on your device, and study from it.</p>
+
+  <h2>Contact</h2>
+  <p>Email <a href="mailto:mehmetefecan@gmail.com">mehmetefecan@gmail.com</a> with your question or problem. Please
+  say which device and system version you use (for example "iPhone 15, iOS 26" or "Pixel 9, Android 16") and what
+  you tried. Replies usually come within a few days.</p>
+
+  <h2>Getting started</h2>
+  <ol>
+    <li>Create a course (for example "Biology 101"), then a lecture in it.</li>
+    <li>Tap <strong>Record</strong>. The first time, allow the microphone.</li>
+    <li>Write notes as the lecture goes. Each note keeps the moment you started typing it; tap its time later to
+      hear that moment again.</li>
+    <li>Add labels (Important, Review, Task, Definition, Heading), formulas, photos of the board, or the lecture's PDF
+      slides, and draw on the slides.</li>
+    <li>After the lecture: transcribe it, take a quiz from your Definition notes, review flashcards, or export the
+      lecture as PDF, Word or Markdown.</li>
+  </ol>
+
+  <h2>Questions</h2>
+  <h3>Where are my notes? Is there an account?</h3>
+  <p>There is no account. Your lectures stay on your device, in Lectio's own storage. See the
+  <a href="privacy.html">privacy policy</a> for details.</p>
+
+  <h3>Does it keep recording when the screen turns off?</h3>
+  <p>Yes. On iPhone and iPad the recording continues with the screen locked. On Android a "Recording a lecture"
+  notification stays visible while it records, with a Stop button.</p>
+
+  <h3>What happens if I get a phone call while recording?</h3>
+  <p>The recording pauses during the call and continues in the same file afterwards (tap <strong>Resume</strong> if it
+  doesn't continue by itself). Notes stay lined up with the audio.</p>
+
+  <h3>Does transcription send my audio anywhere?</h3>
+  <p>No. Transcription runs on your device. The first time, Lectio downloads the speech model once (about 150 MB for
+  "tiny" or 290 MB for "base"); use Wi-Fi for that. After a transcription, the screen shows how long it took.</p>
+
+  <h3>How do I keep a copy of a lecture?</h3>
+  <p>Open the lecture and use <strong>Export</strong>: choose PDF, Word (.docx) or Markdown, then save or send the file
+  with your device's share sheet.</p>
+
+  <h3>How do I delete everything?</h3>
+  <p>Delete the app (iPhone, iPad) or uninstall it (Android); its storage is removed with it. On Android you can also
+  use Settings › Apps › Lectio › Storage › Clear storage.</p>
+
+  <h3>Which devices are supported?</h3>
+  <p>iPhone and iPad with iOS 16 or newer; Android 8.0 or newer on phones and tablets. There are also versions for
+  macOS, Windows, Linux and the web; see the <a href="./">web version</a> and the project's releases.</p>
+
+  <h2>Accessibility</h2>
+  <p>Lectio works with VoiceOver and TalkBack, follows your text size (up to 200 %) and dark mode. If something is
+  hard to use with your setup, please write; it will be treated as a bug.</p>
+</main>
+</body>
+</html>

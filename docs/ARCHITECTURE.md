@@ -71,16 +71,22 @@ lectio/
 ├── Cargo.toml                 # workspace root + the `lectio` app; dependencies split by target
 ├── index.html, Trunk.toml     # web build (trunk build --release → dist/)
 ├── web/lectio-capture-worklet.js  # browser audio-thread code for recording
+├── web/privacy.html, support.html # Phase 6 (ADR-040): static pages, copied into the site (/lectio/privacy.html)
 ├── .github/workflows/ci.yml   # CI: ubuntu/windows/macos + web; Phase 5a: iOS (Simulator); Phase 5b: Android
 │                              #   (emulator, KVM); Phase 4b: desktop screenshots (xvfb, WARP), audio
 │                              #   self-test, browser screen-reader flow (advisory)
-├── .github/workflows/release.yml  # Phase 4b: on v* tags, .dmg / .msi + .zip / AppImage / web zip → GitHub release
+├── .github/workflows/release.yml  # Phase 4b: on v* tags, .dmg / .msi + .zip / AppImage / web zip → GitHub release;
+│                              #   Phase 6: the tag must match mobile/version.properties
+├── .github/workflows/store-upload.yml # Phase 6 (ADR-041): by hand only; TestFlight and Play internal testing,
+│                              #   each only if its secrets exist
 ├── .cargo/config.toml         # WebAssembly SIMD for browser builds (P-035)
 ├── tools/web-smoke.mjs        # headless-Chrome test driver; flows phase2 (CI, incl. PDF/DOCX export), a11y (CI:
 │                              #   accessibility tree, screen-reader clicks, Tab order), phase3 / phase4a (local)
 ├── tools/package/             # Phase 4b: macos.sh (.app + .dmg), windows.ps1 + lectio.wxs (.zip + .msi),
 │                              #   linux-appimage.sh, web.sh; used by release.yml and runnable locally; Phase 5b:
-│                              #   android.sh (release APK, signed from the environment or with the debug key)
+│                              #   android.sh (release APK, signed from the environment or with the debug key);
+│                              #   Phase 6: android-bundle.sh (signed .aab for Google Play, 16 KB check)
+├── tools/store/screenshots.sh # Phase 6 (ADR-039): store screenshots from the UI tests, iOS and Android
 ├── assets/sample-slides.pdf   # 2-page deck for sample data, tests and the browser flow
 ├── assets/fonts/              # Inter, JetBrains Mono, Noto Sans Math (OFL), Phosphor icons (MIT); sources in README.md
 ├── assets/icon/               # Phase 4b: lectio-icon.png (drawn by src/media/icon.rs) for the installers; Phase 5a:
@@ -88,6 +94,11 @@ lectio/
 │                              #   lectio-icon-android-foreground.png / -monochrome.png (adaptive icon layers)
 ├── mobile/ios/                # Phase 5a (ADR-029, ADR-030): the SwiftUI app; see "Phase 5a" for its files
 ├── mobile/android/            # Phase 5b (ADR-033): the Compose app (Gradle); see "Phase 5b" for its files
+├── mobile/version.properties  # Phase 6 (ADR-036): version and build number for both store apps
+├── mobile/{ios,android}/fastlane/ # Phase 6 (ADR-041): store listings as files (metadata/), lanes, Appfile
+├── mobile/store-answers.md    # Phase 6 (ADR-040): every store questionnaire answer, with the reason
+├── mobile/Gemfile             # fastlane, pinned
+├── tools/mobile/archive-ios.sh # Phase 6 (ADR-037): Release archive + App Store export/upload, team id passed in
 ├── tools/mobile/build-ios.sh  # Phase 5a: XCFramework (device + Simulator), Swift bindings, Xcode project (XcodeGen)
 ├── tools/mobile/build-android.sh # Phase 5b: lectio-ffi .so for 3 ABIs (cargo-ndk), host library, Kotlin bindings,
 │                              #   icon layers
@@ -125,6 +136,7 @@ lectio/
 │   │   ├── ink.rs             # Phase 4b: InkStroke / PageInk on a deck, checks + rounding, eraser hit test, undo
 │   │   ├── math.rs, math/     # Phase 4b: LaTeX subset parser (parse.rs, symbols.rs) + box layout (typeset)
 │   │   ├── paper.rs           # Phase 4b: the paper view's blocks, pictures needed, Markdown writer
+│   │   ├── sample.rs          # Phase 6: the sample lecture (desktop demo, phone screenshots, tests)
 │   │   └── storage.rs         # LibraryStore, interpret_saved, JsonFileStore, FileBlobStore (atomic writes)
 │   └── tests/                 # model, material, workflow, transcript, search, audio DSP, seek, clock, storage,
 │                              #   resample, capture pipeline, study (chunking, citations, quiz), review (SM-2,
@@ -147,7 +159,8 @@ lectio/
 │                              #   slides, ink, photos), study.rs (offline quiz, SM-2 cards), export.rs, audio.rs
 │                              #   (AudioRecorder → desktop WAV, AudioPlayer with WSOLA speed), draft.rs (NoteDraft),
 │                              #   engines.rs (SpeechEngine, StudyEngine, ProgressListener), models.rs (files + SHA-256
-│                              #   check); bin/uniffi-bindgen.rs; tests/ffi_tests.rs (13 tests); Phase 5b: audio as bytes for JNA
+│                              #   check); bin/uniffi-bindgen.rs; tests/ffi_tests.rs (14 tests); Phase 5b: audio as bytes for JNA;
+│                              #   Phase 6: sample.rs (add_sample_library: the sample lecture with a playable WAV)
 ├── crates/lectio-worker/      # the browser's Web Worker (wasm only; empty on desktop): Whisper (Phase 3), and in a
 │                              #   second copy the study model and the dictionary index (Phase 4a, study.rs)
 ├── src/
@@ -1158,10 +1171,14 @@ generation number stops the old thread. Losing audio focus or unplugging headpho
 
 ```
 mobile/android/
-├── settings.gradle.kts, build.gradle.kts, gradle.properties (lectio.version), gradlew + gradle/wrapper (checksum pinned)
+├── settings.gradle.kts, build.gradle.kts, gradle.properties, gradlew + gradle/wrapper (checksum pinned)
+├── keystore.properties        # Phase 6: the upload key's settings; local only, in .gitignore
 ├── gradle/libs.versions.toml  # every dependency and plugin version
 └── app/
-    ├── build.gradle.kts       # SDK 26–37 (compiles against 37.1), ABI filter, generated sources, JNA, signing from env
+    ├── build.gradle.kts       # SDK 26–37 (compiles against 37.1), ABI filter, generated sources, JNA, signing from env;
+    │                          #   Phase 6: id + version from ../version.properties, R8 for release, -Plectio.testRelease
+    ├── proguard-rules.pro     # Phase 6: keep JNA and the UniFFI bindings (found by name)
+    ├── proguard-test-rules.pro, proguard-release-tests.pro # only for tests run against the shrunk build (P-068, P-069)
     └── src/
         ├── main/AndroidManifest.xml, res/ (strings, themes, adaptive icon, notification icon, FileProvider paths)
         ├── main/java/org/lectio/android/
@@ -1209,3 +1226,68 @@ segments in X s (Y× real time)." after each run, as on iOS, so a phone can be m
 - An APK signed with a debug key can't update one signed elsewhere; Android then needs an uninstall, which deletes the
   notes on the phone (export them first). Release signing needs the four `ANDROID_*` secrets.
 - As on iOS: no sketches, screen recording, word look-up, tasks or focus timer yet; only the small study model.
+
+## Phase 6: store release (1.0.0)
+
+Lectio 1.0.0 is prepared for the App Store and Google Play as **Lectio: Lecture Notes**, with the id
+`io.github.mehmetefeozdemir.lectio` on both (ADR-036). The app's data and flows don't change; this phase is about how
+a store build is made, described and checked. The account steps are in `docs/STORE.md`.
+
+### From one version file to two stores
+```mermaid
+flowchart LR
+    V["mobile/version.properties<br/>version=1.0.0, build=1"]
+    V --> BI["tools/mobile/build-ios.sh<br/>(XcodeGen: MARKETING_VERSION,<br/>CURRENT_PROJECT_VERSION)"]
+    V --> G["app/build.gradle.kts<br/>(versionName, versionCode)"]
+    BI --> AI["tools/mobile/archive-ios.sh<br/>xcodebuild archive (Release)<br/>+ -exportArchive (ExportOptions.plist)"]
+    T["LECTIO_TEAM_ID<br/>(environment only)"] --> AI
+    AI --> IPA["Lectio.ipa to App Store Connect<br/>(Xcode, the script, or fastlane beta)"]
+    G --> AB["tools/package/android-bundle.sh<br/>16 KB check, bundleRelease (R8),<br/>signer check"]
+    K["upload key<br/>(environment or keystore.properties)"] --> AB
+    AB --> AAB["Lectio-1.0.0-1.aab to Play Console<br/>(browser, or fastlane internal)"]
+    V --> R["release.yml: the v* tag<br/>must match the file"]
+```
+
+### Screenshots from the tests (ADR-039)
+```mermaid
+sequenceDiagram
+    participant S as tools/store/screenshots.sh
+    participant D as Simulator or emulator
+    participant T as UI test (store mode)
+    participant C as lectio-ffi
+    participant F as fastlane folders
+    S->>D: light mode, clean status bar, screen size per form factor
+    S->>T: run the StoreScreenshot test with its switch on
+    T->>C: add_sample_library() (lectio_core::sample, slides, silent 50-minute WAV)
+    T->>T: home, play from the 17:05 note and pause, slides page 2, transcript, quiz
+    T-->>S: PNGs (xcresult attachments or test storage)
+    S->>F: ios/fastlane/screenshots/en-US and android/.../images/*Screenshots
+    S->>D: put size, density and status bar back
+```
+
+The same sample lecture is the desktop's demo data, so every platform shows the same course, notes, slides with ink,
+transcript and quiz. The Play feature graphic (1024×500) and icon (512×512) are drawn by a Rust test
+(`src/media/store_art.rs`) from the notebook drawing of the app icon.
+
+### What a store build contains, and what it doesn't
+| | iOS (Release archive) | Android (release bundle) |
+|---|---|---|
+| ids | `io.github.mehmetefeozdemir.lectio` (`.tests`, `.uitests` for the test targets) | the same `applicationId`; Kotlin namespace `org.lectio.android` |
+| privacy | `PrivacyInfo.xcprivacy`: no tracking, no collected data, FileTimestamp (C617.1) | Data safety: nothing collected or shared |
+| encryption | `ITSAppUsesNonExemptEncryption = NO` (HTTPS only) | — |
+| background | `UIBackgroundModes: audio`, used only while recording; playback pauses in the background | foreground service type `microphone`, only while recording |
+| test hooks | launch options compiled only in Debug (`#if DEBUG`) | `startForTests()` is called only by tests; the test manifest only in debug |
+| size | — | R8 and resource shrinking; JNA and `uniffi.**` kept (`proguard-rules.pro`) |
+| native code | static library inside the app binary | one `.so` per ABI, uncompressed, 16 KB aligned (64-bit) |
+
+### Phase 6 fixes found by the screenshots
+- Ink on the phones: `drawn_width` is now the fraction of the page width from `lectio_export::ink::relative_width`
+  (P-073). Before, every saved stroke filled the page.
+- Two panes on a 7-inch tablet: the list takes at most 40 % of the width (P-074).
+
+### Phase 6 known limitations
+- Nothing has been uploaded yet: the account steps (`docs/STORE.md`) and both stores' reviews are still ahead, and
+  the upload workflow has not run with real secrets.
+- The App Privacy and Data safety answers assume nothing is sent to the developer; crash reporting or sync would
+  have to change them first (ADR-040).
+- Screenshots are in English and light mode only.

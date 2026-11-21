@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  App Store export of the archive (ADR-037), used by tools/mobile/archive-ios.sh.
+  No team id here: the script adds it (from LECTIO_TEAM_ID) to a temporary
+  copy, and sets "destination" to "upload" when it uploads.
+-->
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>app-store-connect</string>
+    <key>destination</key>
+    <string>export</string>
+    <key>signingStyle</key>
+    <string>automatic</string>
+    <key>uploadSymbols</key>
+    <true/>
+    <key>manageAppVersionAndBuildNumber</key>
+    <false/>
+</dict>
+</plist>

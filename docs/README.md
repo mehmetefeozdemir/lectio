@@ -111,9 +111,15 @@ The UI test's screenshots are then in `build/outputs/connected_android_test_addi
 the end shows how long it took and the speed against real time. The first run downloads the model (tiny 151 MB,
 base 290 MB).
 
+## App Store and Google Play
+Version 1.0.0 is being submitted to both stores as **Lectio: Lecture Notes** (the icon on the home screen says
+"Lectio"); links will be added here once the listings are live. The privacy policy and support page are on the
+website: https://mehmetefeozdemir.github.io/lectio/privacy.html and
+https://mehmetefeozdemir.github.io/lectio/support.html. How a store build is made and uploaded is in `docs/STORE.md`.
+
 ## iPhone and iPad (build it yourself)
-The iOS app is not on the App Store; you build it on a Mac and run it in the Simulator or on your own iPhone or iPad
-(iOS 16 or newer). It keeps its notes in the same layout as the desktop app.
+Until the App Store listing is live, you build the iOS app on a Mac and run it in the Simulator or on your own iPhone
+or iPad (iOS 16 or newer). It keeps its notes in the same layout as the desktop app.
 
 **You need:** a Mac with Xcode (16 or newer, from the App Store; open it once to install its components) and Rust
 (https://rustup.rs). From the `` folder:
@@ -146,9 +152,10 @@ in Xcode.
    when asked. (The switch appears after the phone has been connected to Xcode once.)
 4. In Xcode, click the **Lectio** project › target **Lectio** › **Signing & Capabilities**: keep **Automatically manage
    signing** on and pick your **Personal Team**.
-5. If Xcode says the bundle identifier `org.lectio.Lectio` "is not available", someone else's team already uses it:
-   change it there to something unique, e.g. `org.lectio.Lectio.yourname`. This change lives in the generated project
-   only, so it isn't committed (run step 4 again after regenerating the project).
+5. The bundle identifier `io.github.mehmetefeozdemir.lectio` belongs to the store version, so another team can't
+   use it: Xcode says it "is not available". Change it there to something unique, e.g.
+   `io.github.yourname.lectio`. This change lives in the generated project only, so it isn't committed (run step 4
+   again after regenerating the project).
 6. Choose your iPhone at the top of the window and press **⌘R**.
 7. The first time, the phone refuses to open an app from an "Untrusted Developer": **Settings › General › VPN & Device
    Management** › your Apple ID › **Trust**. Then open Lectio.

@@ -12,3 +12,5 @@ pub mod math;
 pub mod sketch;
 pub mod slide_text;
 pub mod slides;
+#[cfg(test)]
+mod store_art;

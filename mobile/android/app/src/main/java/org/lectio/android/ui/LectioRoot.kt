@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.min
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.CancellationException
@@ -31,6 +32,8 @@ import org.lectio.android.models.HomeViewModel
 /** At this width and wider (tablets, unfolded phones, landscape), list and lecture sit side by side. */
 private val TWO_PANE_MIN_WIDTH = 600.dp
 private val LIST_PANE_WIDTH = 360.dp
+/** On narrow tablets the list takes at most this share, so the lecture keeps a phone's width (P-076). */
+private const val LIST_PANE_MAX_SHARE = 0.4f
 
 /**
  * Lectures and the open lecture: side by side on wide screens, one at a time
@@ -46,8 +49,9 @@ fun LectioRoot(graph: AppGraph) {
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         if (maxWidth >= TWO_PANE_MIN_WIDTH) {
+            val listWidth = min(LIST_PANE_WIDTH, maxWidth * LIST_PANE_MAX_SHARE)
             Row(Modifier.fillMaxSize()) {
-                Box(Modifier.width(LIST_PANE_WIDTH).fillMaxHeight()) {
+                Box(Modifier.width(listWidth).fillMaxHeight()) {
                     HomeScreen(home, selected) { selected = it }
                 }
                 VerticalDivider()

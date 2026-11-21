@@ -1,0 +1,24 @@
+Lectio is a note-taking app for lectures. Record a class and write notes as it goes: each note keeps the moment of the recording it belongs to, so later you can tap a note and hear exactly what was being said.
+
+WHILE YOU LISTEN
+• Record with the screen locked. A phone call pauses the recording, and it carries on in the same file afterwards.
+• Write notes stamped with the moment you started typing.
+• Label notes as Important, Review, Task, Definition or Heading.
+• Import the lecture's PDF slides, link notes to pages, and draw on them with a pen or highlighter.
+• Add photos of the board or a handout, and formulas written in LaTeX with a live preview.
+
+AFTER THE LECTURE
+• Play the recording from any note, at 0.5× to 2× speed.
+• Transcribe the recording on your iPhone or iPad with a speech model that is downloaded once; tap any line of the transcript to hear it.
+• Search across notes, slides and transcripts.
+• Study with a quiz made from your Definition notes, flashcards that come back on a schedule, and an outline and questions written by a small study model that also runs on your device.
+• Export a lecture as PDF, Word or Markdown and share it.
+
+PRIVATE BY DESIGN
+• No account, no ads, no tracking.
+• Your recordings and notes stay on your device. Transcription and the study tools run on your device; the internet is only used to download those models.
+
+ACCESSIBLE
+• Works with VoiceOver, follows your text size and Dark Mode, and fits iPhone and iPad, with the lecture list and the open lecture side by side on iPad.
+
+There are also versions of Lectio for Android, macOS, Windows, Linux and the web.

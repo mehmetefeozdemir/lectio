@@ -2,18 +2,30 @@ import SwiftUI
 
 /// How the app was started. Normal launches keep the library in
 /// Application Support/Lectio, in the same layout as the desktop app.
-/// UI tests pass `-LectioFreshStart YES` (an empty library in a temporary
-/// folder) and `-LectioTestAudio YES` (a test tone instead of the microphone
-/// and a silent clock instead of the speaker, because CI Simulators have no
-/// audio hardware).
+///
+/// Debug builds only (the App Store build is Release, so none of this can be
+/// switched on there, ADR-037): UI tests pass `-LectioFreshStart YES` (an
+/// empty library in a temporary folder), `-LectioTestAudio YES` (a test tone
+/// instead of the microphone and a silent clock instead of the speaker,
+/// because CI Simulators have no audio hardware) and, for the store
+/// screenshots, `-LectioSampleLibrary YES` (the sample lecture).
 struct LaunchOptions {
     let dataDirectory: URL
     let usesTestAudio: Bool
+    let addsSampleLibrary: Bool
 
-    static func current(_ defaults: UserDefaults = .standard) -> LaunchOptions {
+    static func current() -> LaunchOptions {
+        #if DEBUG
+        let defaults = UserDefaults.standard
         let fresh = defaults.bool(forKey: "LectioFreshStart")
-        let directory = fresh ? testDirectory() : libraryDirectory()
-        return LaunchOptions(dataDirectory: directory, usesTestAudio: defaults.bool(forKey: "LectioTestAudio"))
+        return LaunchOptions(
+            dataDirectory: fresh ? testDirectory() : libraryDirectory(),
+            usesTestAudio: defaults.bool(forKey: "LectioTestAudio"),
+            addsSampleLibrary: fresh && defaults.bool(forKey: "LectioSampleLibrary")
+        )
+        #else
+        return LaunchOptions(dataDirectory: libraryDirectory(), usesTestAudio: false, addsSampleLibrary: false)
+        #endif
     }
 
     static func libraryDirectory() -> URL {
@@ -21,6 +33,7 @@ struct LaunchOptions {
         return base.appendingPathComponent("Lectio", isDirectory: true)
     }
 
+    #if DEBUG
     private static func testDirectory() -> URL {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("LectioUITest", isDirectory: true)
         if FileManager.default.fileExists(atPath: directory.path) {
@@ -32,6 +45,7 @@ struct LaunchOptions {
         }
         return directory
     }
+    #endif
 }
 
 /// The library and the audio, shared by every screen.
@@ -73,6 +87,9 @@ final class Startup: ObservableObject {
         do {
             try FileManager.default.createDirectory(at: options.dataDirectory, withIntermediateDirectories: true)
             let library = try LectioLibrary.open(dataDir: options.dataDirectory.path)
+            if options.addsSampleLibrary {
+                _ = try library.addSampleLibrary()
+            }
             app = AppModel(library: library, options: options)
             problem = ""
         } catch {
@@ -85,6 +102,7 @@ final class Startup: ObservableObject {
 @main
 struct LectioApp: App {
     @StateObject private var startup = Startup()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -106,6 +124,14 @@ struct LectioApp: App {
                         .multilineTextAlignment(.center)
                 }
                 .padding()
+            }
+        }
+        .onChange(of: scenePhase) { phase in
+            // Background audio is for recording only (a lecture keeps
+            // recording with the screen locked); playback stops when the app
+            // leaves the screen (ADR-037).
+            if phase == .background {
+                startup.app?.player.pause()
             }
         }
     }

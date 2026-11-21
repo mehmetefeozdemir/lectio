@@ -5,8 +5,8 @@
 
 use tiny_skia::{FillRule, GradientStop, LineCap, LinearGradient, Paint, PathBuilder, Pixmap, Point, Rect, SpreadMode, Stroke, Transform};
 
-const TOP: [u8; 3] = [0x4F, 0x46, 0xE5];
-const BOTTOM: [u8; 3] = [0x6D, 0x5B, 0xD0];
+pub(crate) const TOP: [u8; 3] = [0x4F, 0x46, 0xE5];
+pub(crate) const BOTTOM: [u8; 3] = [0x6D, 0x5B, 0xD0];
 const PAGE: [u8; 3] = [0xFF, 0xFF, 0xFF];
 const LINES: [u8; 3] = [0xB9, 0xB4, 0xF0];
 const WAVE: [u8; 3] = [0x6D, 0x5B, 0xD0];
@@ -120,7 +120,7 @@ fn draw_background(pixmap: &mut Pixmap, shape: Shape, t: Transform) -> Option<()
 /// The open notebook: notes on the left page, a sound wave on the right.
 /// `monochrome` draws the pages in white and cuts the marks out of them
 /// (themed Android icons use only the alpha of this layer).
-fn draw_notebook(pixmap: &mut Pixmap, monochrome: bool, t: Transform) -> Option<()> {
+pub(crate) fn draw_notebook(pixmap: &mut Pixmap, monochrome: bool, t: Transform) -> Option<()> {
     let s = pixmap.width() as f32;
     let u = |v: f32| v * s / 1024.0;
     let mark = |rgb: [u8; 3]| {

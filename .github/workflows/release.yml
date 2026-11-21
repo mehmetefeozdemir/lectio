@@ -40,6 +40,7 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:
+      - uses: actions/checkout@v4
       - id: v
         working-directory: .
         env:
@@ -50,6 +51,17 @@ jobs:
             echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           else
             echo "version=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+          fi
+      # A tag must match the mobile apps' version (ADR-036), so a release and
+      # the store builds can't disagree.
+      - name: The tag matches mobile/version.properties
+        if: github.event_name == 'push'
+        working-directory: .
+        run: |
+          app_version="$(sed -n 's/^version=//p' mobile/version.properties)"
+          if [ "${GITHUB_REF_NAME#v}" != "$app_version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match mobile/version.properties ($app_version)."
+            exit 1
           fi
 
   macos:

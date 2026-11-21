@@ -113,6 +113,13 @@ generate_project() {
     # The icon comes from assets/icon (drawn by src/media/icon.rs), so the
     # desktop and the phone never drift apart.
     cp assets/icon/lectio-icon-ios.png mobile/ios/Lectio/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+    # Version and build number from the one shared file (ADR-036).
+    LECTIO_VERSION="$(sed -n 's/^version=//p' mobile/version.properties)"
+    LECTIO_BUILD="$(sed -n 's/^build=//p' mobile/version.properties)"
+    [[ "$LECTIO_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "mobile/version.properties: version must look like 1.0.0"
+    [[ "$LECTIO_BUILD" =~ ^[1-9][0-9]*$ ]] || fail "mobile/version.properties: build must be a whole number above 0"
+    export LECTIO_VERSION LECTIO_BUILD
+    echo "Version $LECTIO_VERSION, build $LECTIO_BUILD"
     local xcodegen
     xcodegen="$(xcodegen_binary)"
     "$xcodegen" generate --spec mobile/ios/project.yml --project mobile/ios

@@ -14,10 +14,16 @@ pub const HIGHLIGHT_ALPHA: u8 = 96;
 /// The highlighter is drawn wider than the width stored for it.
 pub const HIGHLIGHT_SCALE: f32 = 4.0;
 
-/// Width on a page `page_width` pixels wide.
-pub fn stroke_width(stroke: &InkStroke, page_width: f32) -> f32 {
+/// Width as drawn, as a fraction of the page width (the highlighter widened).
+/// The phone apps scale this by the page's on-screen width themselves.
+pub fn relative_width(stroke: &InkStroke) -> f32 {
     let scale = if stroke.tool == InkTool::Highlighter { HIGHLIGHT_SCALE } else { 1.0 };
-    (stroke.width * page_width * scale).max(1.0)
+    stroke.width * scale
+}
+
+/// Width on a page `page_width` pixels wide, at least one pixel.
+pub fn stroke_width(stroke: &InkStroke, page_width: f32) -> f32 {
+    (relative_width(stroke) * page_width).max(1.0)
 }
 
 pub fn alpha(stroke: &InkStroke) -> u8 {

@@ -1,0 +1,7 @@
+# fastlane, for uploading to the stores (ADR-041). From app/mobile:
+#   bundle install
+#   (cd ios && bundle exec fastlane beta)        TestFlight
+#   (cd android && bundle exec fastlane internal) Play internal testing
+source "https://rubygems.org"
+
+gem "fastlane", "2.242.0"

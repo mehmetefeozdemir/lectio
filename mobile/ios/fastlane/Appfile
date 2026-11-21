@@ -1,0 +1,3 @@
+# The App Store identity (ADR-036). The team id is never stored here; it comes
+# from LECTIO_TEAM_ID (see Fastfile).
+app_identifier("io.github.mehmetefeozdemir.lectio")
