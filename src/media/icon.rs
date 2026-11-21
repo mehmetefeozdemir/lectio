@@ -36,14 +36,26 @@ fn rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<tiny_skia::Pat
 }
 
 /// Desktop icons carry their own rounded square with a transparent margin;
-/// iPhone and iPad icons are full squares that the system rounds itself.
+/// iPhone and iPad icons are full squares that the system rounds itself;
+/// Android icons are layers (a background, the notebook on its own, and a
+/// one-colour copy for themed icons) that the launcher masks and moves.
+/// All but `Rounded` are drawn only by the (ignored) test that writes the
+/// icon files.
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(not(test), allow(dead_code))]
 enum Shape {
     Rounded,
-    /// Drawn only by the (ignored) test that writes the icon files.
-    #[cfg_attr(not(test), allow(dead_code))]
     FullBleed,
+    AndroidForeground,
+    AndroidMonochrome,
 }
+
+/// Android's always-visible circle is 66 of the layer's 108 dp; the
+/// notebook's corners reach 382 units from the middle of the 1024 grid.
+const ANDROID_ZOOM: f32 = 0.30 * 1024.0 / 382.0;
+/// An adaptive icon layer: 108 dp at the highest density (4×).
+#[cfg(test)]
+const ANDROID_LAYER_PX: u32 = 432;
 
 /// The icon as straight (not premultiplied) RGBA, `size` × `size` pixels.
 pub fn rgba(size: u32) -> Option<Vec<u8>> {
@@ -54,17 +66,40 @@ pub fn rgba(size: u32) -> Option<Vec<u8>> {
 const SQUARE_START: f32 = 64.0;
 const SQUARE_SIZE: f32 = 896.0;
 
+/// Where the 1024 grid lands for each shape: the full-bleed icon scales the
+/// square to fill the canvas, the Android layers shrink the notebook into
+/// the safe circle.
+fn placement(shape: Shape, size: f32) -> Transform {
+    let u = |v: f32| v * size / 1024.0;
+    match shape {
+        Shape::Rounded => Transform::identity(),
+        Shape::FullBleed => {
+            let zoom = 1024.0 / SQUARE_SIZE;
+            Transform::from_translate(-u(SQUARE_START), -u(SQUARE_START)).post_scale(zoom, zoom)
+        }
+        Shape::AndroidForeground | Shape::AndroidMonochrome => Transform::from_translate(-u(512.0), -u(512.0))
+            .post_scale(ANDROID_ZOOM, ANDROID_ZOOM)
+            .post_translate(u(512.0), u(512.0)),
+    }
+}
+
 fn draw(size: u32, shape: Shape) -> Option<Vec<u8>> {
     let mut pixmap = Pixmap::new(size, size)?;
-    let s = size as f32;
+    let t = placement(shape, size as f32);
+    if matches!(shape, Shape::Rounded | Shape::FullBleed) {
+        draw_background(&mut pixmap, shape, t)?;
+    }
+    draw_notebook(&mut pixmap, shape == Shape::AndroidMonochrome, t)?;
+    Some(pixmap.pixels().iter().flat_map(|p| {
+        let c = p.demultiply();
+        [c.red(), c.green(), c.blue(), c.alpha()]
+    }).collect())
+}
+
+/// The indigo square with a top-to-bottom gradient.
+fn draw_background(pixmap: &mut Pixmap, shape: Shape, t: Transform) -> Option<()> {
+    let s = pixmap.width() as f32;
     let u = |v: f32| v * s / 1024.0;
-    // The full-bleed icon is the same drawing, scaled so the square fills it.
-    let zoom = 1024.0 / SQUARE_SIZE;
-    let t = match shape {
-        Shape::Rounded => Transform::identity(),
-        Shape::FullBleed => Transform::from_translate(-u(SQUARE_START), -u(SQUARE_START)).post_scale(zoom, zoom),
-    };
-    // Background: rounded square with a top-to-bottom gradient.
     let shader = LinearGradient::new(
         Point::from_xy(0.0, u(64.0)),
         Point::from_xy(0.0, u(960.0)),
@@ -79,9 +114,27 @@ fn draw(size: u32, shape: Shape) -> Option<Vec<u8>> {
     let corner = if shape == Shape::Rounded { u(200.0) } else { 0.0 };
     let square = rounded_rect(u(SQUARE_START), u(SQUARE_START), u(SQUARE_SIZE), u(SQUARE_SIZE), corner)?;
     pixmap.fill_path(&square, &background, FillRule::Winding, t, None);
-    // Shadow, then the two pages of the open notebook.
-    let shadow = rounded_rect(u(214.0), u(316.0), u(608.0), u(440.0), u(36.0))?;
-    pixmap.fill_path(&shadow, &paint([0, 0, 0], 50), FillRule::Winding, t, None);
+    Some(())
+}
+
+/// The open notebook: notes on the left page, a sound wave on the right.
+/// `monochrome` draws the pages in white and cuts the marks out of them
+/// (themed Android icons use only the alpha of this layer).
+fn draw_notebook(pixmap: &mut Pixmap, monochrome: bool, t: Transform) -> Option<()> {
+    let s = pixmap.width() as f32;
+    let u = |v: f32| v * s / 1024.0;
+    let mark = |rgb: [u8; 3]| {
+        let mut p = paint(rgb, 255);
+        if monochrome {
+            p.blend_mode = tiny_skia::BlendMode::Clear;
+        }
+        p
+    };
+    // Shadow (not in the one-colour layer), then the two pages.
+    if !monochrome {
+        let shadow = rounded_rect(u(214.0), u(316.0), u(608.0), u(440.0), u(36.0))?;
+        pixmap.fill_path(&shadow, &paint([0, 0, 0], 50), FillRule::Winding, t, None);
+    }
     for x in [u(200.0), u(518.0)] {
         let page = rounded_rect(x, u(292.0), u(306.0), u(440.0), u(32.0))?;
         pixmap.fill_path(&page, &paint(PAGE, 255), FillRule::Winding, t, None);
@@ -94,7 +147,7 @@ fn draw(size: u32, shape: Shape) -> Option<Vec<u8>> {
         p.move_to(u(254.0), y);
         p.line_to(u(254.0 + length), y);
         if let Some(path) = p.finish() {
-            pixmap.stroke_path(&path, &paint(LINES, 255), &line, t, None);
+            pixmap.stroke_path(&path, &mark(LINES), &line, t, None);
         }
     }
     // Right page: a sound wave.
@@ -109,16 +162,13 @@ fn draw(size: u32, shape: Shape) -> Option<Vec<u8>> {
     }
     if let Some(path) = wave.finish() {
         let stroke = Stroke { width: u(22.0), line_cap: LineCap::Round, ..Stroke::default() };
-        pixmap.stroke_path(&path, &paint(WAVE, 255), &stroke, t, None);
+        pixmap.stroke_path(&path, &mark(WAVE), &stroke, t, None);
     }
     // The fold between the pages.
     if let Some(fold) = Rect::from_xywh(u(506.0), u(292.0), u(12.0), u(440.0)) {
-        pixmap.fill_rect(fold, &paint([0xE4, 0xE2, 0xF6], 255), t, None);
+        pixmap.fill_rect(fold, &mark([0xE4, 0xE2, 0xF6]), t, None);
     }
-    Some(pixmap.pixels().iter().flat_map(|p| {
-        let c = p.demultiply();
-        [c.red(), c.green(), c.blue(), c.alpha()]
-    }).collect())
+    Some(())
 }
 
 /// The icon as PNG (for the installers; written by the test below).
@@ -170,6 +220,40 @@ mod tests {
         assert!(corner[2] > 180 && corner[0] < 120, "indigo reaches the corner: {corner:?}");
     }
 
+    /// Android draws adaptive icons in many masks (circle, squircle, ...);
+    /// only the middle 66 of the 108 dp layer is always visible.
+    #[test]
+    fn the_android_foreground_keeps_the_notebook_inside_the_safe_circle() {
+        let size = 432;
+        let pixels = draw(size, Shape::AndroidForeground).unwrap();
+        let safe_radius = size as f32 * 33.0 / 108.0;
+        let centre = size as f32 / 2.0;
+        let mut drawn = 0;
+        for (i, p) in pixels.as_chunks::<4>().0.iter().enumerate() {
+            if p[3] == 0 {
+                continue;
+            }
+            drawn += 1;
+            let (x, y) = ((i as u32 % size) as f32 + 0.5, (i as u32 / size) as f32 + 0.5);
+            assert!(((x - centre).powi(2) + (y - centre).powi(2)).sqrt() <= safe_radius, "pixel ({x}, {y}) is outside the safe zone");
+        }
+        assert!(drawn > 10_000, "the notebook is drawn");
+        assert_eq!(pixels[3], 0, "transparent corner: the background is its own layer");
+    }
+
+    #[test]
+    fn the_android_monochrome_layer_is_white_with_the_lines_cut_out() {
+        let size = 1024;
+        let pixels = draw(size, Shape::AndroidMonochrome).unwrap();
+        let at = |x: u32, y: u32| {
+            let i = ((y * size + x) * 4) as usize;
+            [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+        };
+        assert!(pixels.as_chunks::<4>().0.iter().all(|p| p[3] == 0 || p[..3] == [255, 255, 255]), "only white, at any opacity");
+        assert_eq!(at(266, 667)[3], 255, "a page");
+        assert_eq!(at(342, 422)[3], 0, "the first line of notes is a hole");
+    }
+
     /// `cargo test --bin lectio write_app_icon -- --ignored` writes the PNGs
     /// the installers (`tools/package/*`) and the iOS app use.
     #[test]
@@ -178,5 +262,12 @@ mod tests {
         std::fs::create_dir_all("assets/icon").unwrap();
         std::fs::write("assets/icon/lectio-icon.png", png(1024).unwrap()).unwrap();
         std::fs::write("assets/icon/lectio-icon-ios.png", ios_png(1024).unwrap()).unwrap();
+        // 108 dp at xxxhdpi (4×) = 432 px; the background layer is a gradient
+        // drawable in the Android project.
+        for (shape, name) in [(Shape::AndroidForeground, "foreground"), (Shape::AndroidMonochrome, "monochrome")] {
+            let pixels = draw(ANDROID_LAYER_PX, shape).unwrap();
+            let image = image::RgbaImage::from_raw(ANDROID_LAYER_PX, ANDROID_LAYER_PX, pixels).unwrap();
+            image.save(format!("assets/icon/lectio-icon-android-{name}.png")).unwrap();
+        }
     }
 }

@@ -301,3 +301,32 @@ fn a_note_is_stamped_when_typing_started() {
     draft.set_text(String::new(), 13_000);
     assert_eq!(draft.anchor_ms(14_000), 14_000, "cleared: starts again");
 }
+
+/// Kotlin moves a `List<Float>` through JNA one boxed number at a time; the
+/// byte versions move a block in one copy and must give the same audio.
+#[test]
+fn audio_as_little_endian_bytes_matches_audio_as_floats() {
+    let folder = Folder::new("bytes");
+    let (by_float, by_bytes) = (folder.0.join("floats.wav"), folder.0.join("bytes.wav"));
+    let floats = AudioRecorder::start(by_float.to_string_lossy().into_owned()).unwrap();
+    let bytes = AudioRecorder::start(by_bytes.to_string_lossy().into_owned()).unwrap();
+    for chunk in tone_48k_stereo().chunks(4_800) {
+        floats.push(chunk.to_vec(), 48_000, 2).unwrap();
+        bytes.push_f32le(chunk.iter().flat_map(|s| s.to_le_bytes()).collect(), 48_000, 2).unwrap();
+    }
+    assert_eq!(floats.finish().unwrap(), bytes.finish().unwrap());
+    assert_eq!(std::fs::read(&by_float).unwrap(), std::fs::read(&by_bytes).unwrap());
+    assert!(bytes_recorder_refuses_a_partial_sample(&folder));
+
+    let player = AudioPlayer::open(by_bytes.to_string_lossy().into_owned()).unwrap();
+    let twin = AudioPlayer::open(by_float.to_string_lossy().into_owned()).unwrap();
+    let block: Vec<u8> = player.next_block_f32le(2_048);
+    let expected: Vec<u8> = twin.next_block(2_048).iter().flat_map(|s| s.to_le_bytes()).collect();
+    assert_eq!(block, expected);
+    assert_eq!(block.len(), 2_048 * 4);
+}
+
+fn bytes_recorder_refuses_a_partial_sample(folder: &Folder) -> bool {
+    let recorder = AudioRecorder::start(folder.0.join("odd.wav").to_string_lossy().into_owned()).unwrap();
+    recorder.push_f32le(vec![0, 0, 0], 16_000, 1).is_err()
+}

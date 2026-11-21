@@ -9,3 +9,22 @@ mobile/ios/Lectio/Info.plist
 mobile/ios/Lectio/Assets.xcassets/AppIcon.appiconset/AppIcon.png
 mobile/ios/build/
 xcuserdata/
+
+# Android: made by tools/mobile/build-android.sh and Gradle (ADR-033); nothing
+# machine-specific (local.properties has the SDK path) and no keystores
+mobile/android/.gradle/
+mobile/android/.kotlin/
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/app/src/main/jniLibs/
+mobile/android/app/src/generated/
+mobile/android/app/src/main/res/drawable-nodpi/ic_launcher_foreground.png
+mobile/android/app/src/main/res/drawable-nodpi/ic_launcher_monochrome.png
+mobile/android/local.properties
+mobile/android/.idea/
+*.iml
+*.jks
+*.keystore
+
+# IDE settings (Android Studio, IntelliJ)
+.idea/

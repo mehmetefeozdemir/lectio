@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The icon's indigo, top to bottom: the same colours as src/media/icon.rs
+     (TOP #4F46E5, BOTTOM #6D5BD0). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient
+        android:angle="270"
+        android:endColor="#6D5BD0"
+        android:startColor="#4F46E5"
+        android:type="linear" />
+</shape>

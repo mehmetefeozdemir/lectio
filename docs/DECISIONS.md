@@ -755,3 +755,79 @@
 - **Consequences:** 26 XCTests cover the view models in under a second, including interruptions, route-change formats,
   speed and the note-stamping rule; the UI test runs the real screens end to end on any Simulator. Moving to `@Observable`
   later is a mechanical change once iOS 16 support is dropped.
+
+## ADR-033: Android: Kotlin and Jetpack Compose over the same Rust core
+- **Date:** 2026-11-20
+- **Status:** accepted
+- **Context:** Phase 5b brings the iOS feature set to Android phones and tablets. ADR-029 already put every rule in
+  Rust behind `lectio-ffi`; Android needs its native libraries, a Gradle project anyone can build, and Android's own
+  answers for audio, background work, PDF pages, photos and sharing.
+- **Build:**
+
+  | choice | options considered | chosen, and why |
+  |---|---|---|
+  | Rust for Android | hand-written NDK linker settings; `cargo-ndk`; the Gradle Rust plugin | **`cargo-ndk` 4.1.2, pinned** and installed into `target/tools`: it sets the NDK's linker and sysroot per ABI and nothing else; Gradle stays plain |
+  | ABIs | arm64 only; + armeabi-v7a; + x86_64; + x86 | **arm64-v8a, armeabi-v7a, x86_64**: phones (64- and 32-bit) and the emulators on Intel and AMD machines and CI; 32-bit x86 is too rare to build for |
+  | library size | ship as built; strip in Gradle | **stripped by the script** with the NDK's `llvm-strip` (hundreds of MB → 13–23 MB per ABI), so the size doesn't depend on Gradle finding the NDK |
+  | project | Android Studio's template as-is; Groovy scripts | **Gradle Kotlin scripts, a version catalog (`gradle/libs.versions.toml`), the wrapper committed** with the distribution's SHA-256; AGP 9.5 compiles Kotlin itself (no separate Kotlin Android plugin) |
+  | machine-specific files | committed `local.properties` | **none**: the SDK comes from `ANDROID_HOME` (or Android Studio's default folder); signing from the environment (ADR-035) |
+
+  `tools/mobile/build-android.sh` builds the three `.so` files into `src/main/jniLibs/`, builds `lectio-ffi` for
+  the computer it runs on, writes the Kotlin bindings from it into `src/generated/kotlin/`, and copies the launcher
+  icon layers from `assets/icon`. The NDK is pinned (`30.0.16248370`); the libraries come out 16 KB page-aligned,
+  which newer Android devices require.
+- **The app:**
+
+  | need | options considered | chosen, and why |
+  |---|---|---|
+  | UI | Views + XML; Compose | **Jetpack Compose + Material 3**: the same declarative shape as SwiftUI, so the two apps' screens map one to one |
+  | state | Compose `mutableStateOf` in view models; `StateFlow` | **`StateFlow` of one immutable `State` per view model**, changed with `copy()`; plain Kotlin, so JVM tests can drive it (ADR-034) |
+  | recording | `MediaRecorder` (writes its own files); `AudioRecord` | **`AudioRecord`, 44.1 kHz float mono** (the one rate every device must support), samples to Rust's `AudioRecorder`, which writes the desktop's 16 kHz WAV |
+  | keep recording with the screen off | a wake lock alone; a foreground service | **a foreground service of type `microphone`** with an ongoing notification (time, Stop) and a partial wake lock; Android requires it for background microphone use |
+  | calls and other apps | ignore; telephony callbacks; audio focus | **audio focus**: losing it (a call) pauses the recording, which carries on in the same file when focus returns or the user taps Resume; playback pauses too |
+  | headsets | route to a Bluetooth headset's microphone; keep the phone's | **the phone's microphone** for recording (it hears the lecturer, a headset microphone hears the student); wired headsets are routed by Android; "headphones unplugged" pauses playback |
+  | playback | Media3 / ExoPlayer with its own speed control; `AudioTrack` | **`AudioTrack` fed by Rust's `AudioPlayer`**: the same WSOLA time-stretch and seek as desktop and iOS |
+  | model downloads | `DownloadManager`; `WorkManager`; plain coroutines | **`WorkManager`**: survives the app going to the background and retries after a network drop; files land as `.partial` and Rust checks size and SHA-256 before they're used |
+  | PDF pages | a PDF library; Rust (hayro) bitmaps | **`PdfRenderer`** (built into Android); ink is drawn by Compose in page fractions, stored by Rust |
+  | photos | `CAMERA` permission + CameraX; system intents | **the Photo Picker and the camera intent**: no camera permission to ask for; HEIC pictures are converted to JPEG on the phone |
+  | sharing | a custom sheet | **the system share sheet** with a `FileProvider` link to the export in the cache |
+  | colours | fixed palette; Material You | **Material You for surfaces, Lectio's indigo kept as the primary colour** (lighter in dark theme, as on iOS) |
+  | tablets | one layout; a separate tablet app | **two panes at 600 dp and wider** (list and lecture side by side), one pane with predictive back on phones |
+- **Consequences:** the Android app reads and writes the same files as the desktop and iOS (`files/Lectio/`), and every
+  rule (note stamping, quiz grading, SM-2, exports, Whisper) is the same code. The cost is a second native shell to keep
+  in step with the first, and a Rust build per ABI.
+
+## ADR-034: Android tests: the JVM tests call the real Rust core
+- **Date:** 2026-11-20
+- **Status:** accepted
+- **Context:** the view models are thin, so most bugs would be in how they use the core. Mocking `LectioLibrary`
+  would test the mocks.
+- **Options considered:** mock the generated classes; Robolectric; instrumented tests only (slow, need an emulator);
+  **load the core built for the computer running the tests through JNA (chosen)**.
+- **Decision:** `build-android.sh` also builds `lectio-ffi` for the host (`liblectio_ffi.dylib` / `.so`); Gradle's unit
+  tests point `jna.library.path` at it and use JNA's desktop jar. The 26 JVM tests (home, session, study, recorder,
+  player, formatting) open real libraries in temporary folders and check the real WAV header. Audio hardware sits behind
+  `AudioSource` / `AudioOutput` (a fake microphone and an instant output in the JVM tests; a 440 Hz tone and a silent
+  clock on emulators), and Android's focus/service/broadcast side behind `RecordingHost` / `PlaybackHost`.
+  Instrumented tests (on an emulator) cover what needs Android: the core flow through the real screens, 200 % text in
+  dark mode, the two-pane layout, the Rust library and the microphone on the device's ABI, and an opt-in Whisper
+  benchmark. Their screenshots go through the test storage service, so Gradle copies them to `build/outputs`.
+- **Consequences:** a JVM test run takes seconds and exercises the same Rust as the phone. It needs the host library
+  built first (the script does it; CI runs the script).
+
+## ADR-035: Releasing the Android app as an APK
+- **Date:** 2026-11-20
+- **Status:** accepted
+- **Context:** releases (ADR-028) attach files for every platform; there is no Play Store listing yet, so Android users
+  install the APK by hand.
+- **Options considered:** an Android App Bundle (Play Store only); an unsigned APK (Android refuses to install it); a
+  debug-signed APK; an APK signed with a release key from CI secrets.
+- **Decision:** `tools/package/android.sh <version>` builds the release APK with the version from the tag (version code
+  = major·10000 + minor·100 + patch). If the secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
+  `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` exist, the key is decoded into the runner's temporary folder for that
+  step only and the file is `Lectio-<v>-android.apk`; otherwise it is signed with the runner's debug key and named
+  `…-android-debug-signed.apk`. The APK holds only the three ABIs Lectio's library is built for. R8 is off: JNA and the
+  generated bindings find classes by name, and the saving would be size only.
+- **Consequences:** every release has an installable Android file. A debug-signed APK can't update an install signed by
+  another machine (Android checks the signature), so without the release key an update means uninstalling first; the
+  README says so.

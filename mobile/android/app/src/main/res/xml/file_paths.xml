@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The only folders other apps can be given a link into: finished exports
+     (for the share sheet) and the camera's photo before Lectio imports it.
+     The notes themselves are never shared this way. -->
+<paths>
+    <cache-path name="exports" path="exports/" />
+    <cache-path name="camera" path="camera/" />
+</paths>

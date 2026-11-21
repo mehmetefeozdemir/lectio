@@ -81,6 +81,17 @@ impl AudioRecorder {
         Ok(())
     }
 
+    /// The same as `push`, with the samples as little-endian 32-bit floats.
+    /// Kotlin passes a `List<Float>` through JNA one boxed number at a time
+    /// (slow enough to fall behind the microphone); a byte array is one copy.
+    pub fn push_f32le(&self, bytes: Vec<u8>, sample_rate: u32, channels: u32) -> Result<()> {
+        let (whole, rest) = bytes.as_chunks::<4>();
+        if !rest.is_empty() {
+            return Err(LectioError::Failed("The audio data ended part-way through a sample.".into()));
+        }
+        self.push(whole.iter().map(|b| f32::from_le_bytes(*b)).collect(), sample_rate, channels)
+    }
+
     /// How much has been recorded so far.
     pub fn duration_ms(&self) -> u64 {
         self.lock().map_or(0, |s| ms(s.written))
@@ -171,6 +182,11 @@ impl AudioPlayer {
         out.truncate(n);
         *finished = n == 0;
         out
+    }
+
+    /// `next_block` as little-endian 32-bit floats (one copy through JNA).
+    pub fn next_block_f32le(&self, frames: u32) -> Vec<u8> {
+        self.next_block(frames).iter().flat_map(|s| s.to_le_bytes()).collect()
     }
 
     pub fn is_finished(&self) -> bool {

@@ -2,8 +2,9 @@
 
 Lectio is a lecture note-taking app: record a class, take notes stamped with the moment in the recording, add slides,
 photos, sketches and formulas, transcribe the audio on your own computer, and study from it. It runs on macOS, Windows,
-Linux and in a web browser from one Rust codebase, and on iPhone and iPad as a native app over the same Rust core
-(built from source, see below). Your notes stay on your device; there is no account.
+Linux and in a web browser from one Rust codebase, and as native apps over the same Rust core on Android phones and
+tablets (an APK with each release) and on iPhone and iPad (built from source, see below). Your notes stay on your
+device; there is no account.
 
 Every release on the project's GitHub **Releases** page has these files (`<v>` is the version, e.g. `0.4.0`):
 
@@ -13,6 +14,7 @@ Every release on the project's GitHub **Releases** page has these files (`<v>` i
 | Windows 10 or 11 (64-bit) | `Lectio-<v>-windows-x64.msi` (installer) or `…-windows-x64.zip` (no install) | |
 | Linux (x86-64, glibc 2.39 or newer: Ubuntu 24.04+, Fedora 40+, Debian 13+) | `Lectio-<v>-linux-x86_64.AppImage` | one file, no install |
 | Web | open **https://mehmetefeozdemir.github.io/lectio/**, or `Lectio-<v>-web.zip` to host it yourself | nothing to install |
+| Android 8.0 or newer (phones and tablets) | `Lectio-<v>-android.apk` (or `…-android-debug-signed.apk`) | install by hand, see "Android" |
 | — | `SHA256SUMS.txt` | checksums of all of the above |
 
 To check a download: `shasum -a 256 <file>` (macOS, Linux) or `Get-FileHash <file>` (Windows PowerShell), and compare
@@ -60,6 +62,54 @@ Unzip `Lectio-<v>-web.zip` into a folder on any static web host (GitHub Pages, N
 
 Notes are stored in that browser, for that web address only (IndexedDB). Clearing the site's data deletes them, so use
 **Export** in the paper view to keep copies. Chrome, Edge and Firefox work; Safari 16.4 or newer.
+
+## Android
+### Install the APK on your phone (sideload)
+1. On the phone, open the release page in the browser and download `Lectio-<v>-android.apk` (or the
+   `-debug-signed` one), or copy it over from a computer.
+2. Open the downloaded file. Android asks whether the browser (or Files app) may install apps: **Settings** › allow
+   **Install unknown apps** for it, then go back and tap **Install**.
+3. Open Lectio. The first time you tap **Record**, Lectio explains why it needs the microphone, then Android asks; on
+   Android 13 and newer it also asks for notifications, so a "Recording" notification (with a Stop button) can show
+   while it records with the screen off.
+
+From a computer with the Android platform tools: turn on **Developer options › USB debugging** on the phone, connect it,
+and run `adb install Lectio-<v>-android.apk`.
+
+**Updating:** a newer APK signed with the same key installs over the old one and keeps your notes. A
+`-debug-signed` APK is signed by whichever machine built it, so if Android says the update "conflicts with an existing
+package", export your lectures first (Export › PDF, Word or Markdown), then uninstall and install the new one;
+uninstalling removes the notes stored on the phone.
+
+### Run it in the Android Studio emulator on a Mac
+**You need:** Android Studio (it brings the SDK, the emulator and a Java runtime), Rust (https://rustup.rs), and in
+Android Studio › **Settings › Languages & Frameworks › Android SDK › SDK Tools**: **NDK (Side by side)** version
+`30.0.16248370` (tick "Show Package Details" to pick it).
+1. Build the Rust core for Android, from the `` folder:
+   ```sh
+   tools/mobile/build-android.sh
+   ```
+   The first run takes 10–20 minutes (three Android builds and one for the Mac); later runs only rebuild what changed.
+2. In Android Studio, **File › Open** `mobile/android`. Let Gradle sync (it downloads the Android libraries and,
+   the first time, the Android 37.1 platform).
+3. **Tools › Device Manager › +**: create a virtual device, e.g. a **Medium Phone** with a recent system image. On an
+   Apple Silicon Mac pick an **arm64** image. For the tablet layout, also make a tablet (e.g. **Medium Tablet**).
+4. Pick the device at the top and press **Run ▶**. The emulator records from the Mac's microphone if you allow it in
+   the emulator's settings (Extended controls › Microphone › "Virtual microphone uses host audio input").
+
+Without Android Studio's buttons, from `mobile/android` (with `JAVA_HOME` set, e.g. to Android Studio's runtime
+`/Applications/Android Studio.app/Contents/jbr/Contents/Home`):
+```sh
+./gradlew assembleDebug                 # the debug APK, in app/build/outputs/apk/debug/
+./gradlew installDebug                  # install it on the running emulator or a connected phone
+./gradlew testDebugUnitTest             # the JVM tests (they call the Rust core built for the Mac)
+./gradlew connectedDebugAndroidTest     # the instrumented tests and the UI test, on the emulator
+```
+The UI test's screenshots are then in `build/outputs/connected_android_test_additional_output/`.
+
+**Speed on a real phone:** record a lecture, open **Transcript**, choose a model and tap **Transcribe**; the line at
+the end shows how long it took and the speed against real time. The first run downloads the model (tiny 151 MB,
+base 290 MB).
 
 ## iPhone and iPad (build it yourself)
 The iOS app is not on the App Store; you build it on a Mac and run it in the Simulator or on your own iPhone or iPad
@@ -132,3 +182,5 @@ headers).
 - Drawing on slides needs a mouse, pen or touch; everything else works from the keyboard.
 - iPhone and iPad: VoiceOver reads every control (a note's time button says "Play from 1 minute, 5 seconds"; formulas
   are read as their LaTeX), text follows the Larger Text setting, and the app follows dark mode.
+- Android: TalkBack reads every control the same way (long-press menus are offered as "More actions"), text follows
+  the system font size up to 200 %, and the app follows dark theme and your wallpaper colours.

@@ -634,3 +634,64 @@ Every bug, dead end and wrong turn while building Lectio, with the root cause, w
 - **Root cause:** iOS 26's SDK renamed `.allowBluetooth` to `.allowBluetoothHFP` (the old name is deprecated). My Mac has Xcode 27; `macos-15` runners default to Xcode 16, whose SDK only has the old name. CI was building with an older toolchain than development.
 - **Fix:** the option set is chosen at compile time (`#if compiler(>=6.2)`, the Swift version that ships with Xcode 26), so either Xcode builds it; and the iOS job now runs on `macos-26` and selects the newest Xcode on the runner, printing its version.
 - **Lesson:** CI should use the same toolchain generation as development, and print the version it used. Platform SDKs rename APIs between major releases, so a green local build doesn't prove an older SDK can build it.
+
+## P-057: `This binary may only be called via 'cargo ndk'.`
+- **Phase:** 5b (first run of `tools/mobile/build-android.sh`)
+- **Symptom:** the script installed cargo-ndk into `target/tools/`, ran `target/tools/.../bin/cargo-ndk ndk -t arm64-v8a …` and stopped with that message; on the next run it reinstalled cargo-ndk, because its "is it installed?" check ran the binary the same way and failed.
+- **Root cause:** cargo-ndk is a cargo subcommand: cargo finds `cargo-ndk` on the `PATH` and calls it with `ndk` as the first argument. Calling the binary directly is refused on purpose.
+- **Fix:** the script puts the pinned install's `bin/` first on the `PATH` and runs `cargo ndk …`; the check is `cargo ndk --version | grep 4.1.2`.
+- **Lesson:** read how a tool expects to be invoked before wrapping it; a wrapper's "already installed?" check must use the same invocation as the real call.
+
+## P-058: `Unresolved reference 'uniffi'` in every Kotlin file
+- **Phase:** 5b (first Gradle build)
+- **Symptom:** `compileDebugKotlin` failed on every import of `uniffi.lectio_ffi.*`, although the generated `lectio_ffi.kt` was in `src/generated/kotlin`.
+- **Root cause:** I had added the folder with `java.srcDir(…)`. With AGP 9's built-in Kotlin support, Kotlin sources are a separate set; a folder added to the Java sources isn't compiled as Kotlin.
+- **Fix:** `sourceSets.main { kotlin.directories.add("src/generated/kotlin") }` (the `srcDir` spelling also works but is deprecated).
+- **Lesson:** after a build-tool major version, check how it wants generated sources registered; the old way can fail silently (no error at the registration, only later).
+
+## P-059: `Dependency 'androidx.compose.foundation:foundation-android:1.13.0' requires … version 37.1 or later of the Android APIs`
+- **Phase:** 5b
+- **Symptom:** `checkDebugAarMetadata` failed before any test ran: the Compose BOM 2026.11.01 libraries are built against Android 37.1, and the app compiled against 37.0, the newest platform on my machine.
+- **Options:** pin an older Compose BOM (older Material 3, and the same problem next time), or compile against 37.1.
+- **Fix:** `compileSdk = 37` plus `compileSdkMinor = 1`; Gradle downloaded the 37.1 platform on the next build. `targetSdk` stays 37 (the runtime behaviour Lectio is tested with).
+- **Lesson:** Android now has minor SDK levels; libraries may require one, and the error names the exact version.
+
+## P-060: The UI test couldn't see the app behind the share sheet, and its screenshots showed old frames
+- **Phase:** 5b
+- **Symptom:** the core-flow test exported a PDF, then waited 30 s for "Exported Cells.pdf" and failed (`ComposeTimeoutException`), although the log showed `com.android.intentresolver/.ChooserActivity` opening. Another run's "share sheet" screenshot showed the export menu still open.
+- **Root cause:** two separate things. The system share sheet is another app's window on top of Lectio, so the Compose test (which only sees Lectio's own UI) couldn't find the status line under it. And a Compose test draws new frames only when the test waits for the UI; a plain `Thread.sleep` before a screenshot captured whatever frame was last drawn.
+- **Fix:** the test checks what the share sheet was given (the exported file starts with `%PDF`) and waits until the active window belongs to another package before its screenshot; every screenshot is preceded by `waitForIdle()`.
+- **Lesson:** a UI test can't see past its own app; check the effect (a file, the active window) instead. In Compose tests, sleeping doesn't advance the UI, waiting does.
+
+## P-061: On the emulator, a 3.9 s recording saved only about 2 s of audio
+- **Phase:** 5b (found by the UI test's screenshot: "Recording 0:02" after 3.5 s)
+- **Symptom:** in the core-flow test, the recording held audio focus for 3.9 s (the system log shows the request and the release), but the saved WAV was about 2 s long. The same test tone recorded alone for 2 s gave exactly 2,000 ms (20 blocks, slowest 30 ms).
+- **Cause (most likely):** each 100 ms block went to Rust as a `List<Float>`: UniFFI's Kotlin code converts it one boxed number at a time (9,600 for the 48 kHz stereo tone). Cheap on its own, but with the UI test, the keyboard and a debug build all busy on the emulator, the tone thread fell behind and stayed behind, so blocks were still waiting when recording stopped. A real microphone falling behind would lose audio inside `AudioRecord` the same way.
+- **Fix:** `lectio-ffi` gained `AudioRecorder::push_f32le` and `AudioPlayer::next_block_f32le`, which take and return the samples as little-endian bytes; Kotlin's `ByteArray` crosses JNA in one copy. A Rust test checks that both paths write byte-identical WAVs. The UI test now also asserts the saved recording is at least 3 s; it passes, and the screenshot shows 0:03.
+- **Lesson:** at a language boundary, prefer bulk types (bytes) for bulk data. And assert the numbers a screenshot only shows.
+
+## P-062: The APK claimed to support x86, mips and armeabi
+- **Phase:** 5b (checking the first release APK with `aapt2 dump badging`)
+- **Symptom:** `native-code: 'arm64-v8a' 'armeabi' 'armeabi-v7a' 'mips' 'mips64' 'x86' 'x86_64'`, although Lectio's library is built for three ABIs.
+- **Root cause:** JNA's Android library ships its dispatch library for every ABI, so the APK had folders for ABIs where `liblectio_ffi.so` is missing. A 32-bit x86 device would install the app and then fail to load the core.
+- **Fix:** `ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }`; the APK now lists exactly those three and is 1 MB smaller.
+- **Lesson:** check the built artifact, not just the build: one dependency's native files can widen what the app claims to support.
+
+## P-063: The Whisper benchmark on the emulator: `Permission denied (os error 13)`
+- **Phase:** 5b
+- **Symptom:** after `adb push`ing the models to `/sdcard/Android/data/org.lectio.android/files/bench/`, `SpeechEngine.load` failed: `A model file is missing (…/config.json): Permission denied`.
+- **Root cause:** `adb shell mkdir -p` created the app's external folder before the app did, owned by the shell user, so the app couldn't read it.
+- **Fix:** the files are staged in `/data/local/tmp` and copied into the app's private folder with `run-as org.lectio.android cp -r …` (allowed for debug builds); the benchmark reads `files/bench`.
+- **Lesson:** let an app create its own folders; copying in with `run-as` keeps the app as me.
+
+## P-064: At 200 % text the lecture tabs read "Slide" and "Trans"
+- **Phase:** 5b (the dark-mode, 200 % text screenshot)
+- **Symptom:** the four tabs (Notes, Slides, Transcript, Study) shared the width equally and the labels were cut to fit.
+- **Fix:** a scrollable tab row: at normal sizes it looks the same; at large sizes the tabs keep their full text and scroll sideways.
+- **Lesson:** fixed-width rows of words break at large font sizes; test at 200 % and look.
+
+## P-065: Deprecations in the newest Compose, Material 3 and WorkManager
+- **Phase:** 5b
+- **Symptom:** warnings on `ListItem(headlineContent = …)`, the value-based `Slider`, `Data.getStringArray`, and the Compose test rules `createEmptyComposeRule` / `createAndroidComposeRule`.
+- **Fix:** plain rows instead of `ListItem`; the `SliderState` slider (which also lets playback seek once when a drag ends, instead of on every movement); `getNullableStringArray`; the `v2` test rules. The build has no warnings.
+- **Lesson:** starting on the newest libraries means following their newest APIs; the warnings name the replacement.

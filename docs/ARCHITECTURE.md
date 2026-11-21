@@ -1,7 +1,8 @@
 # Architecture
 
-> Updated after each phase. Current state: **end of Phase 5a (Mobile, iOS first)**: a native SwiftUI app for iPhone and
-> iPad over the same Rust core through UniFFI (`lectio-ffi`), on top of Phases 1–4b (see "Phase 5a" at the end).
+> Updated after each phase. Current state: **end of Phase 5b (Android)**: native apps for iPhone/iPad (SwiftUI, 5a) and
+> Android phones/tablets (Jetpack Compose, 5b) over the same Rust core through UniFFI (`lectio-ffi`), on top of
+> Phases 1–4b (see "Phase 5a" and "Phase 5b" at the end).
 
 ## Stack
 Rust 2024 edition, **one codebase for Windows, macOS, Linux and the web** (ADR-010). UI with **eframe/egui 0.37** (ADR-003),
@@ -13,7 +14,8 @@ PDF slides with **hayro** (ADR-011), photos with **image**, sketches with **tiny
 Phase 5a adds **iPhone and iPad**: a native **SwiftUI** app (`mobile/ios`) over the same Rust crates, called through
 **UniFFI** bindings generated from `crates/lectio-ffi` (ADR-029). Rust keeps the data model, the storage format, seek and
 time-stretch, exports, Whisper and the study model; Swift owns the screens, the audio session, the camera and the share
-sheet. The Android app (5b) will use the same `lectio-ffi` with Kotlin bindings.
+sheet. Phase 5b adds **Android**: a native **Kotlin / Jetpack Compose** app (`mobile/android`) over the same
+`lectio-ffi`, through Kotlin bindings and JNA (ADR-033).
 
 ## Platform boundary
 ```mermaid
@@ -69,20 +71,26 @@ lectio/
 ├── Cargo.toml                 # workspace root + the `lectio` app; dependencies split by target
 ├── index.html, Trunk.toml     # web build (trunk build --release → dist/)
 ├── web/lectio-capture-worklet.js  # browser audio-thread code for recording
-├── .github/workflows/ci.yml   # CI: ubuntu/windows/macos + web; Phase 4b: desktop screenshots (xvfb, WARP), audio
+├── .github/workflows/ci.yml   # CI: ubuntu/windows/macos + web; Phase 5a: iOS (Simulator); Phase 5b: Android
+│                              #   (emulator, KVM); Phase 4b: desktop screenshots (xvfb, WARP), audio
 │                              #   self-test, browser screen-reader flow (advisory)
 ├── .github/workflows/release.yml  # Phase 4b: on v* tags, .dmg / .msi + .zip / AppImage / web zip → GitHub release
 ├── .cargo/config.toml         # WebAssembly SIMD for browser builds (P-035)
 ├── tools/web-smoke.mjs        # headless-Chrome test driver; flows phase2 (CI, incl. PDF/DOCX export), a11y (CI:
 │                              #   accessibility tree, screen-reader clicks, Tab order), phase3 / phase4a (local)
 ├── tools/package/             # Phase 4b: macos.sh (.app + .dmg), windows.ps1 + lectio.wxs (.zip + .msi),
-│                              #   linux-appimage.sh, web.sh; used by release.yml and runnable locally
+│                              #   linux-appimage.sh, web.sh; used by release.yml and runnable locally; Phase 5b:
+│                              #   android.sh (release APK, signed from the environment or with the debug key)
 ├── assets/sample-slides.pdf   # 2-page deck for sample data, tests and the browser flow
 ├── assets/fonts/              # Inter, JetBrains Mono, Noto Sans Math (OFL), Phosphor icons (MIT); sources in README.md
 ├── assets/icon/               # Phase 4b: lectio-icon.png (drawn by src/media/icon.rs) for the installers; Phase 5a:
-│                              #   lectio-icon-ios.png (full-bleed, opaque) for iPhone and iPad
+│                              #   lectio-icon-ios.png (full-bleed, opaque) for iPhone and iPad; Phase 5b:
+│                              #   lectio-icon-android-foreground.png / -monochrome.png (adaptive icon layers)
 ├── mobile/ios/                # Phase 5a (ADR-029, ADR-030): the SwiftUI app; see "Phase 5a" for its files
+├── mobile/android/            # Phase 5b (ADR-033): the Compose app (Gradle); see "Phase 5b" for its files
 ├── tools/mobile/build-ios.sh  # Phase 5a: XCFramework (device + Simulator), Swift bindings, Xcode project (XcodeGen)
+├── tools/mobile/build-android.sh # Phase 5b: lectio-ffi .so for 3 ABIs (cargo-ndk), host library, Kotlin bindings,
+│                              #   icon layers
 ├── crates/lectio-core/        # pure domain logic: no UI, no audio I/O, no platform code
 │   ├── src/
 │   │   ├── lib.rs             # public API, MAX_NAME_CHARS
@@ -139,7 +147,7 @@ lectio/
 │                              #   slides, ink, photos), study.rs (offline quiz, SM-2 cards), export.rs, audio.rs
 │                              #   (AudioRecorder → desktop WAV, AudioPlayer with WSOLA speed), draft.rs (NoteDraft),
 │                              #   engines.rs (SpeechEngine, StudyEngine, ProgressListener), models.rs (files + SHA-256
-│                              #   check); bin/uniffi-bindgen.rs; tests/ffi_tests.rs (12 tests)
+│                              #   check); bin/uniffi-bindgen.rs; tests/ffi_tests.rs (13 tests); Phase 5b: audio as bytes for JNA
 ├── crates/lectio-worker/      # the browser's Web Worker (wasm only; empty on desktop): Whisper (Phase 3), and in a
 │                              #   second copy the study model and the dictionary index (Phase 4a, study.rs)
 ├── src/
@@ -1071,3 +1079,133 @@ mobile/ios/
 - The study model's small size (0.5B) is the only one offered on the phone; the larger one needs more memory than many
   iPhones give an app.
 - Simulator timings use the Mac's processor; real numbers need a device.
+
+## Phase 5b: Android
+
+### The same split, with Kotlin (ADR-033)
+```mermaid
+flowchart TB
+  subgraph android["Compose app (mobile/android/app)"]
+    UI["Screens: LectioRoot (one or two panes), Home, Session (Notes, Slides, Transcript, Study)"]
+    VM["View models (StateFlow of one immutable State): Home, Session, Study, Transcription"]
+    AU["Audio: RecorderController, PlayerController (pure Kotlin)"]
+    AH["Android side: MicrophoneSource (AudioRecord), TrackOutput (AudioTrack), AndroidAudioHost (focus, unplugged), RecordingService (foreground, microphone)"]
+    MS["ModelStore + DownloadWorker (WorkManager)"]
+    UI --> VM
+    UI --> AU
+    AU --> AH
+    VM --> MS
+  end
+  subgraph gen["Made by tools/mobile/build-android.sh"]
+    K["uniffi/lectio_ffi/lectio_ffi.kt (Kotlin bindings, JNA)"]
+    SO["jniLibs/arm64-v8a, armeabi-v7a, x86_64/liblectio_ffi.so (stripped, 16 KB pages)"]
+  end
+  subgraph rust["Rust (crates/), the same as desktop and iOS"]
+    F["lectio-ffi"]
+  end
+  VM --> K
+  AU --> K
+  MS -->|"verify_download"| K
+  K --> SO --> F
+```
+Everything that has a rule in it is the same Rust as on the desktop and iOS (see the table in Phase 5a). Kotlin keeps
+the screens, Android's audio and background rules, the share sheet, the photo picker and the camera intent.
+
+On disk the library is `files/Lectio/` in the app's private storage, in the desktop's layout (`library.json`,
+`recordings/`, `blobs/`, `models/`), written through the core's stores.
+
+### Record → note → stop (Android)
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant S as Session screen
+  participant R as RecorderController
+  participant H as AndroidAudioHost
+  participant M as MicrophoneSource (AudioRecord thread)
+  participant A as AudioRecorder (Rust)
+  U->>S: Record
+  S->>S: first time: explain, then ask for the microphone (and notifications)
+  S->>R: start(session)
+  R->>A: AudioRecorder.start(recordings/<id>.wav)
+  R->>M: start(sink)
+  R->>H: recordingStarted(title)
+  H->>H: audio focus (transient), RecordingService: foreground "microphone", notification with Stop, wake lock
+  loop every 100 ms
+    M->>A: push_f32le(bytes, 44100, 1): one copy through JNA
+  end
+  Note over H,R: A call takes audio focus: interruptionBegan (reading pauses); focus back: carries on in the same file
+  U->>S: types a note (NoteDraft keeps when typing started), Add
+  U->>S: Stop (or Stop in the notification)
+  R->>A: finish() → duration; library.attach_recording
+  R->>H: recordingStopped(): focus released, service stopped
+```
+Playback is the iOS design on Android: `TrackOutput` writes blocks from Rust's `AudioPlayer` (`next_block_f32le`,
+2048 samples, the WSOLA speed change) into a streaming `AudioTrack` on its own thread; a seek restarts the track, and a
+generation number stops the old thread. Losing audio focus or unplugging headphones pauses it.
+
+### Screens and Android conventions
+- **Two panes** at 600 dp and wider (tablets, unfolded phones, landscape): the list (360 dp) and the open lecture side
+  by side. On phones one pane at a time, and the back gesture slides the lecture away as the finger moves (predictive
+  back, `PredictiveBackHandler`, enabled in the manifest).
+- **Permissions:** the microphone (and, on Android 13+, notifications for the recording notification) are asked for at
+  the first recording, after a short explanation; if refused, the app says where to change it and links to Settings.
+  The camera needs no permission (the system camera app takes the photo); the Photo Picker needs none either.
+- **Colours:** Material You on Android 12+, with Lectio's indigo as the primary colour; dark theme follows the system.
+- **Icon:** an adaptive icon: the indigo gradient as the background layer, the notebook (drawn by `src/media/icon.rs`
+  inside the 66 dp safe circle) as the foreground, and a one-colour layer for themed icons.
+- **Downloads:** WorkManager runs the model download (it continues in the background and retries after a network
+  drop); progress shows on the Transcript and Study tabs.
+
+```
+mobile/android/
+├── settings.gradle.kts, build.gradle.kts, gradle.properties (lectio.version), gradlew + gradle/wrapper (checksum pinned)
+├── gradle/libs.versions.toml  # every dependency and plugin version
+└── app/
+    ├── build.gradle.kts       # SDK 26–37 (compiles against 37.1), ABI filter, generated sources, JNA, signing from env
+    └── src/
+        ├── main/AndroidManifest.xml, res/ (strings, themes, adaptive icon, notification icon, FileProvider paths)
+        ├── main/java/org/lectio/android/
+        │   ├── LectioApplication.kt   # AppGraph (library, recorder, player, models, revision); startForTests()
+        │   ├── MainActivity.kt        # edge to edge, LectioTheme, LectioRoot
+        │   ├── support/Format.kt      # errorText, TimeText (clock + spoken), labels, fileSize, transcriptionDoneText
+        │   ├── audio/                 # AudioPorts (interfaces, ToneSource, ClockOutput, byte helpers),
+        │   │                          #   RecorderController, PlayerController, AndroidAudio (MicrophoneSource,
+        │   │                          #   TrackOutput, AndroidAudioHost), RecordingService
+        │   ├── models/                # Home/Session/Study/TranscriptionViewModel, ModelProvider + JobProgress,
+        │   │                          #   ModelStore + DownloadWorker
+        │   └── ui/                    # theme/Theme, LectioRoot, HomeScreen, SessionScreen (audio bar, export, permissions),
+        │                              #   NotesTab (composer, formula editor, photos), SlidesTab (PdfRenderer + ink),
+        │                              #   TranscriptTab, StudyTab, Common (label chips, formula image)
+        ├── test/                      # JVM tests (26) calling the Rust core built for the computer, through JNA
+        ├── androidTest/               # CoreFlowTest (Compose UI), 200 % text + dark, two panes, Rust and microphone on
+        │                              #   the device, tone timing, Whisper benchmark (opt-in)
+        ├── main/jniLibs/, generated/kotlin/   # made by build-android.sh, not committed
+        └── main/res/drawable-nodpi/ic_launcher_{foreground,monochrome}.png  # copied from assets/icon, not committed
+```
+
+### Measured speed (Android emulator)
+25.9 s of speech made with the macOS `say` voice; the arm64 Android 37 emulator on a MacBook Air M2;
+`WhisperBenchmarkTest` (the app's own Kotlin → Rust path), three runs:
+
+| model | Android emulator | iOS Simulator (Phase 5a) | desktop, same Mac |
+|---|---|---|---|
+| tiny | 5.8–6.1 s (4.2–4.5× real time), complete | 6.1–8.2 s | — |
+| base | 13.1–13.6 s (1.9–2.0× real time), complete | 41–44 s | 3.9 s |
+
+The emulator runs ARM code on the Mac's processor with virtualisation, so it is closer to the desktop than the iOS
+Simulator is, but it is not a phone: a real device is needed for real numbers. The Transcript tab shows "Done: N
+segments in X s (Y× real time)." after each run, as on iOS, so a phone can be measured from the screen.
+
+### Phase 5b accessibility
+- TalkBack: every icon button has a label ("Play", "Pause", "Add note", "Export", "Previous page"); a note's time chip
+  says "Play from 1 minute, 5 seconds"; lecture rows, search results and label rows are read as one item; long-press
+  menus are offered as a named action ("More actions"); formulas are read as their LaTeX; headings are marked.
+- Things that change on their own (the status line, transcription progress, quiz answers) are polite live regions.
+- Text uses Material's type scale in sp; the 200 % test checks Home and a lecture in dark mode, and the tab row
+  scrolls instead of cutting labels (P-064).
+
+### Phase 5b known limitations
+- Recording uses the phone's microphone even when a Bluetooth headset is connected (on purpose, ADR-033).
+- An APK signed with a debug key can't update one signed elsewhere; Android then needs an uninstall, which deletes the
+  notes on the phone (export them first). Release signing needs the four `ANDROID_*` secrets.
+- As on iOS: no sketches, screen recording, word look-up, tasks or focus timer yet; only the small study model.

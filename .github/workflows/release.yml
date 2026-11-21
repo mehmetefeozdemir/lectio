@@ -4,6 +4,7 @@
 #   Windows: Lectio-<v>-windows-x64.zip and .msi
 #   Linux: Lectio-<v>-linux-x86_64.AppImage
 #   Web: Lectio-<v>-web.zip                 (files for any static host)
+#   Android: Lectio-<v>-android.apk         (or -android-debug-signed.apk without a key)
 # The packaging steps are scripts in tools/package/, so they can be run
 # and checked locally too. Signing happens only when the secrets exist:
 #   macOS: MACOS_CERT_P12, MACOS_CERT_PASSWORD, MACOS_SIGNING_IDENTITY,
@@ -174,8 +175,51 @@ jobs:
           path: dist-release/*.zip
           if-no-files-found: error
 
+  # Phase 5b (ADR-035): the Android APK. Signed with the release key only when
+  # the secrets exist (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
+  # ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD); otherwise debug-signed, which
+  # installs by hand but can't update an install signed elsewhere.
+  android:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install the pinned NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;30.0.16248370"
+      - name: Build the APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          LECTIO_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          LECTIO_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          LECTIO_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/lectio.jks"
+            export LECTIO_KEYSTORE_FILE="$RUNNER_TEMP/lectio.jks"
+          fi
+          tools/package/android.sh "$VERSION"
+          rm -f "$RUNNER_TEMP/lectio.jks"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          path: dist-release/*.apk
+          if-no-files-found: error
+
   publish:
-    needs: [version, macos, windows, linux, web]
+    needs: [version, macos, windows, linux, web, android]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
